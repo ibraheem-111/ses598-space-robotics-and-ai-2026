@@ -224,6 +224,8 @@ Kp Angular: 8.9
 Kd Angular: 0.08
 Spacing: 1.0
 
+Cross Track Error: 0.07878952206910053
+
 Plot of results Over Trails: 
 
 <img width="640" height="400" alt="Cross Track Error per Trail" src="https://github.com/ibraheem-111/ses598-space-robotics-and-ai-2026/blob/main/model_accuracy.png?raw=true" />
