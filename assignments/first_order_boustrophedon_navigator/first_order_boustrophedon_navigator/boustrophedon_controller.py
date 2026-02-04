@@ -7,9 +7,10 @@ from turtlesim.msg import Pose
 import numpy as np
 import math
 from collections import deque
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, Float64MultiArray
 from rcl_interfaces.msg import SetParametersResult
 import matplotlib.pyplot as plt
+from ses_assignment1_interfaces.msg import CustomMsg
 
 class BoustrophedonController(Node):
     def __init__(self):
@@ -40,7 +41,15 @@ class BoustrophedonController(Node):
         # Create publisher and subscriber
         self.velocity_publisher = self.create_publisher(Twist, '/turtle1/cmd_vel', 10)
         self.pose_subscriber = self.create_subscription(Pose, '/turtle1/pose', self.pose_callback, 10)
-        self.parameters_subscription = self.create_subscription(Pose, '/optimizer/params', self.parameter_sub_callback, 10)
+        
+        # SITL messaging for optimizer
+        self.gains_subscriber = self.create_subscription(
+            Float64MultiArray, '/optimizer/gains', self.gains_callback, 10
+        )
+        self.final_result_publisher = self.create_publisher(
+            Float64MultiArray, '/controller/final_result', 10
+        )
+        self.current_trial_id = None
 
         
         # Lawnmower pattern parameters
@@ -73,6 +82,11 @@ class BoustrophedonController(Node):
         self.final_error_pub = self.create_publisher(
             Float64,
             'final_average_cross_track_error',
+            10
+        )
+        self.PerformanceMsgPub = self.create_publisher(
+            CustomMsg,
+            'performance_metrics',
             10
         )
         
@@ -142,6 +156,9 @@ class BoustrophedonController(Node):
                 final_avg_error = sum(self.cross_track_errors) / len(self.cross_track_errors)
                 self.get_logger().info(f'Final average cross-track error: {final_avg_error:.3f}')
                 self.save_data(final_avg_error)
+                # Publish result for SITL optimizer
+                if self.current_trial_id is not None:
+                    self.publish_final_result(self.current_trial_id, final_avg_error)
 
             self.timer.cancel()
             self.plot_data()
@@ -184,6 +201,17 @@ class BoustrophedonController(Node):
             self.current_waypoint += 1
             self.get_logger().info(f'Reached waypoint {self.current_waypoint}')
 
+        percentage_complete = (self.current_waypoint / len(self.waypoints)) * 100.0
+        performance_msg = CustomMsg()
+        performance_msg.cross_track_error = cross_track_error
+        performance_msg.current_velocity = vel_msg.linear.x
+        performance_msg.distance_to_next_waypoint = distance
+        performance_msg.completion_percentage = percentage_complete
+        performance_msg.position_x = self.pose.x
+        performance_msg.position_y = self.pose.y
+        performance_msg.current_angular_velocity = vel_msg.angular.z
+        self.PerformanceMsgPub.publish(performance_msg)
+
     def parameter_callback(self, params):
         for param in params:
             if param.name == 'Kp_linear':
@@ -199,15 +227,51 @@ class BoustrophedonController(Node):
                 self.waypoints = self.generate_waypoints()
         return SetParametersResult(successful=True)
     
-    def parameter_sub_callback(self, msg):
-        params = msg
-        self.Kd_angular = params.Kd_angular
-        self.Kp_angular = params.Kp_angular
-        self.Kd_linear = params.Kd_linear
-        self.Kp_linear = params.Kp_linear
-        self.spacing = params.spacing
-
-        self.waypoints = self.generate_waypoints()
+    def gains_callback(self, msg):
+        """Receive gains from optimizer and start a new trial."""
+        try:
+            # Unpack: [trial_id, Kp_linear, Kd_linear, Kp_angular, Kd_angular, spacing]
+            if len(msg.data) < 6:
+                self.get_logger().warn('Invalid gains message length')
+                return
+            
+            self.current_trial_id = int(msg.data[0])
+            self.Kp_linear = msg.data[1]
+            self.Kd_linear = msg.data[2]
+            self.Kp_angular = msg.data[3]
+            self.Kd_angular = msg.data[4]
+            self.spacing = msg.data[5]
+            
+            # Reset for new trial
+            self.cross_track_errors.clear()
+            self.trajectory.clear()
+            self.velocities.clear()
+            self.current_waypoint = 0
+            self.prev_linear_error = 0.0
+            self.prev_angular_error = 0.0
+            self.waypoints = self.generate_waypoints()
+            
+            # Restart timer for new trial
+            try:
+                self.timer.cancel()
+            except:
+                pass
+            self.timer = self.create_timer(0.1, self.control_loop)
+            
+            self.get_logger().info(
+                f'Trial {self.current_trial_id}: Kp_linear={self.Kp_linear:.3f}, '
+                f'Kd_linear={self.Kd_linear:.3f}, Kp_angular={self.Kp_angular:.3f}, '
+                f'Kd_angular={self.Kd_angular:.3f}, spacing={self.spacing:.3f}'
+            )
+        except Exception as e:
+            self.get_logger().error(f'Error in gains_callback: {e}')
+    
+    def publish_final_result(self, trial_id, final_avg_error):
+        """Publish trial result back to optimizer."""
+        msg = Float64MultiArray()
+        msg.data = [float(trial_id), final_avg_error]
+        self.final_result_publisher.publish(msg)
+        self.get_logger().info(f'Published result for trial {trial_id}: error={final_avg_error:.3f}')
 
 
 

@@ -215,7 +215,7 @@ This will demonstrate understanding of:
 
 ## Acknowledgements: Aldrin Inbaraj A, Arizona State University. 
 
-# Answer: 
+# Assignment Submission: 
 
 Best Parameter Values: 
 Kp Linear :6.2
@@ -246,4 +246,10 @@ First created a file called experimentlog.csv. This file automatically logs each
 Moreover I created a launch file to get the optimizer working, however, it only uses an internal basic model instead of using the simulation itself. I placed the simulation in the optimization loop so we could get accurate values of the optmization results. However I did not use the optimizer for the results produced in this assignment.
 
 # Extra Credit
-
+This is the output of echoing the performance metrics topic. 
+It uses the custom message type that I called CustomMsg.msg. For this I followed the instructions in https://ros2-tutorial.readthedocs.io/en/latest/create_interface_package.html and created a seperate package for interfaces. The interfaces package is then imported into our assingment 1 package before being used. 
+The ses assignment1 interfaces is the name of the interfaces package. (assignments/ses_assignment1_interfaces)
+The message type is defined in assignments/ses_assignment1_interfaces/msg/CustomMsg.msg
+The Message is published in bostrophedon_controller.py node. (assignments/first_order_boustrophedon_navigator/first_order_boustrophedon_navigator/boustrophedon_controller.py)
+And the name of the topic is : /performance_metrics
+![alt text](image.png)

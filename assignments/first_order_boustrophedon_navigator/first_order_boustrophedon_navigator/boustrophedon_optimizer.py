@@ -3,14 +3,21 @@
 import rclpy
 from rclpy.node import Node
 from turtlesim.msg import Pose
+from std_msgs.msg import Float64MultiArray
 import numpy as np
 import math
 import optuna
 from collections import deque
+import threading
+import time
 
 class BoustrophedonOptimizer(Node):
     def __init__(self):
         super().__init__('boustrophedon_optimizer')
+
+        # Declare parameter for SITL mode
+        self.declare_parameter('sitl_mode', False)
+        self.sitl_mode = self.get_parameter('sitl_mode').value
 
         # Declare parameter search ranges and trials
         self.KP_LINEAR_RANGE = (5.0, 15.0)
@@ -20,7 +27,7 @@ class BoustrophedonOptimizer(Node):
         self.n_trials = 5000
 
         # Spacing parameter
-        self.spacing = 0.3
+        self.spacing = 1.0
 
         # Initialize cross-track error storage and waypoints
         self.cross_track_errors = deque(maxlen=1000)
@@ -31,6 +38,21 @@ class BoustrophedonOptimizer(Node):
         # Error tracking for derivative control
         self.prev_linear_error = 0.0
         self.prev_angular_error = 0.0
+        
+        # SITL messaging for communicating with controller
+        if self.sitl_mode:
+            self.gains_publisher = self.create_publisher(
+                Float64MultiArray, '/optimizer/gains', 10
+            )
+            self.final_result_subscriber = self.create_subscription(
+                Float64MultiArray, '/controller/final_result', self.result_callback, 50
+            )
+            # Thread-safe storage for trial results
+            self.pending_results = {}  # trial_id -> {'event': threading.Event, 'error': float}
+            self.results_lock = threading.Lock()
+            self.get_logger().info('SITL mode enabled: will communicate with controller via ROS topics')
+        else:
+            self.get_logger().info('SITL mode disabled: will use local simulation')
 
     def generate_waypoints(self):
         waypoints = []
@@ -125,6 +147,52 @@ class BoustrophedonOptimizer(Node):
         avg_error = sum(self.cross_track_errors) / len(self.cross_track_errors) if self.cross_track_errors else float('inf')
         return avg_error
 
+    def result_callback(self, msg):
+        """Receive trial result from controller."""
+        try:
+            if len(msg.data) < 2:
+                self.get_logger().warn('Invalid result message length')
+                return
+            
+            trial_id = int(msg.data[0])
+            final_error = msg.data[1]
+            
+            with self.results_lock:
+                if trial_id in self.pending_results:
+                    self.pending_results[trial_id]['error'] = final_error
+                    self.pending_results[trial_id]['event'].set()
+                    self.get_logger().info(f'Received result for trial {trial_id}: error={final_error:.3f}')
+                else:
+                    self.get_logger().warn(f'Received result for unknown trial {trial_id}')
+        except Exception as e:
+            self.get_logger().error(f'Error in result_callback: {e}')
+    
+    def wait_for_result(self, trial_id, timeout=50):
+        """Wait for result from controller with timeout.
+        
+        Returns:
+            float: final average error if received, None if timeout
+        """
+        with self.results_lock:
+            if trial_id not in self.pending_results:
+                event = threading.Event()
+                self.pending_results[trial_id] = {'event': event, 'error': None}
+            else:
+                event = self.pending_results[trial_id]['event']
+        
+        # Wait for result with timeout
+        if event.wait(timeout=timeout):
+            with self.results_lock:
+                error = self.pending_results[trial_id]['error']
+                del self.pending_results[trial_id]
+            return error
+        else:
+            self.get_logger().warn(f'Timeout waiting for trial {trial_id} result (>{timeout}s)')
+            with self.results_lock:
+                if trial_id in self.pending_results:
+                    del self.pending_results[trial_id]
+            return None
+
     def optimize_gains(self):
         def objective(trial):
             Kp_linear = trial.suggest_float('Kp_linear', *self.KP_LINEAR_RANGE)
@@ -132,9 +200,26 @@ class BoustrophedonOptimizer(Node):
             Kp_angular = trial.suggest_float('Kp_angular', *self.KP_ANGULAR_RANGE)
             Kd_angular = trial.suggest_float('Kd_angular', *self.KD_ANGULAR_RANGE)
 
-            avg_error = self.simulate_controller(Kp_linear, Kd_linear, Kp_angular, Kd_angular)
-            self.get_logger().info(f'Trial with params: Kp_linear={Kp_linear}, Kd_linear={Kd_linear}, '
-                                   f'Kp_angular={Kp_angular}, Kd_angular={Kd_angular}, Avg Error={avg_error:.3f}')
+            # If SITL mode, publish gains to controller and wait for result
+            if self.sitl_mode:
+                trial_id = trial.number
+                msg = Float64MultiArray()
+                msg.data = [float(trial_id), Kp_linear, Kd_linear, Kp_angular, Kd_angular, self.spacing]
+                self.gains_publisher.publish(msg)
+                self.get_logger().info(f'Trial {trial_id}: published gains to controller')
+                
+                # Wait for controller to complete trial and return error (30s timeout)
+                avg_error = self.wait_for_result(trial_id, timeout=30.0)
+                if avg_error is None:
+                    # Fallback to local simulation if timeout
+                    self.get_logger().warn(f'Trial {trial_id}: timeout, falling back to local simulation')
+                    avg_error = self.simulate_controller(Kp_linear, Kd_linear, Kp_angular, Kd_angular)
+            else:
+                # Local simulation mode (default)
+                avg_error = self.simulate_controller(Kp_linear, Kd_linear, Kp_angular, Kd_angular)
+            
+            self.get_logger().info(f'Trial with params: Kp_linear={Kp_linear:.3f}, Kd_linear={Kd_linear:.3f}, '
+                                   f'Kp_angular={Kp_angular:.3f}, Kd_angular={Kd_angular:.3f}, Avg Error={avg_error:.3f}')
             return avg_error
 
         # Baseline comparison
