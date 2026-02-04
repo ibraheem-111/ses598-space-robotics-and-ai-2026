@@ -26,7 +26,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'boustrophedon_controller = first_order_boustrophedon_navigator.boustrophedon_controller:main'
+            'boustrophedon_controller = first_order_boustrophedon_navigator.boustrophedon_controller:main',
+            'boustrophedon_optimizer = first_order_boustrophedon_navigator.boustrophedon_optimizer:main',
         ],
     },
 ) 

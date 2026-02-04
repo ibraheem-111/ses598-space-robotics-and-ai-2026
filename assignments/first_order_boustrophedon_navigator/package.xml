@@ -11,6 +11,8 @@
   <depend>geometry_msgs</depend>
   <depend>turtlesim</depend>
   <depend>numpy</depend>
+  <depend>matplotlib</depend>
+  <depend>optuna</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

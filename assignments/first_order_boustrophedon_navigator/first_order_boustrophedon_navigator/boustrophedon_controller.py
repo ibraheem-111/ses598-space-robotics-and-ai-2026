@@ -19,11 +19,11 @@ class BoustrophedonController(Node):
         self.declare_parameters(
             namespace='',
             parameters=[
-                ('Kp_linear', 1.0),
-                ('Kd_linear', 0.1),
-                ('Kp_angular', 1.0),
-                ('Kd_angular', 0.1),
-                ('spacing', 0.5)
+                ('Kp_linear',),
+                ('Kd_linear',),
+                ('Kp_angular',),
+                ('Kd_angular',),
+                ('spacing',)
             ]
         )
 
@@ -40,6 +40,8 @@ class BoustrophedonController(Node):
         # Create publisher and subscriber
         self.velocity_publisher = self.create_publisher(Twist, '/turtle1/cmd_vel', 10)
         self.pose_subscriber = self.create_subscription(Pose, '/turtle1/pose', self.pose_callback, 10)
+        self.parameters_subscription = self.create_subscription(Pose, '/optimizer/params', self.parameter_sub_callback, 10)
+
         
         # Lawnmower pattern parameters
         self.waypoints = self.generate_waypoints()
@@ -65,6 +67,12 @@ class BoustrophedonController(Node):
         self.error_pub = self.create_publisher(
             Float64, 
             'cross_track_error', 
+            10
+        )
+
+        self.final_error_pub = self.create_publisher(
+            Float64,
+            'final_average_cross_track_error',
             10
         )
         
@@ -133,6 +141,8 @@ class BoustrophedonController(Node):
             if self.cross_track_errors:
                 final_avg_error = sum(self.cross_track_errors) / len(self.cross_track_errors)
                 self.get_logger().info(f'Final average cross-track error: {final_avg_error:.3f}')
+                self.save_data(final_avg_error)
+
             self.timer.cancel()
             self.plot_data()
             return
@@ -188,6 +198,18 @@ class BoustrophedonController(Node):
                 self.spacing = param.value
                 self.waypoints = self.generate_waypoints()
         return SetParametersResult(successful=True)
+    
+    def parameter_sub_callback(self, msg):
+        params = msg
+        self.Kd_angular = params.Kd_angular
+        self.Kp_angular = params.Kp_angular
+        self.Kd_linear = params.Kd_linear
+        self.Kp_linear = params.Kp_linear
+        self.spacing = params.spacing
+
+        self.waypoints = self.generate_waypoints()
+
+
 
     def plot_data(self):
         trajectory = np.array(self.trajectory)
@@ -223,8 +245,26 @@ class BoustrophedonController(Node):
 
         self.get_logger().info("Plots saved as PNG files.")
 
+    def save_data(self, final_avg_error):
+        trajectory = np.array(self.trajectory)
+        velocities = np.array(self.velocities)
+        np.savetxt("trajectory.csv", trajectory, delimiter=",", header="x,y", comments="")
+        np.savetxt("velocities.csv", velocities, delimiter=",", header="linear_velocity,angular_velocity", comments="")
+        np.savetxt("cross_track_errors.csv", np.array(self.cross_track_errors), delimiter=",", header="error", comments="")
+        log_path = "/home/ibraheem/ses598-space-robotics-and-ai-2026/experimentslog.csv"
+        with open(log_path, "a") as f:
+            if f.tell() == 0:
+                f.write("Kp_linear,Kd_linear,Kp_angular,Kd_angular,spacing,final_avg_error\n")
+            f.write(f"{self.Kp_linear},{self.Kd_linear},{self.Kp_angular},{self.Kd_angular},{self.spacing},{final_avg_error}\n")
+        
+        self.get_logger().info("Data saved as CSV files.")
+
 def main(args=None):
     rclpy.init(args=args)
+    logger = rclpy.logging.get_logger('boustrophedon_controller')
+    logger.info("Starting Boustrophedon Controller...")
+    logger.info(f"Using config: {args}")
+    logger.info("************************************************")
     controller = BoustrophedonController()
     
     try:
