@@ -215,3 +215,35 @@ This will demonstrate understanding of:
 
 ## Acknowledgements: Aldrin Inbaraj A, Arizona State University. 
 
+# Answer: 
+
+Best Parameter Values: 
+Kp Linear :6.2
+Kd Linear: 0.4
+Kp Angular: 8.9
+Kd Angular: 0.08
+Spacing: 1.0
+
+Plot of results Over Trails: 
+
+<img width="640" height="400" alt="Cross Track Error per Trail" src="https://github.com/ibraheem-111/ses598-space-robotics-and-ai-2026/blob/main/model_accuracy.png?raw=true" />
+
+Final Trajectory:
+
+![alt text](trajectory.png)
+
+Final Velocity Profile:
+
+![alt text](velocity_profiles.png)
+
+Cross-Track Error Over Time:
+![alt text](cross_track_error.png)
+
+## Tuning Methodology: 
+
+First created a file called experimentlog.csv. This file automatically logs each parameter set and the resulting cross-track error values. I made sure that the YAML file was being properly passed into the controller node. At first I ran the simulation with the default values listed in the YAML file. Then scaled down each parameter to a low starting value. Then I coarsely started exploring with a single parameter until I reached a coarse minimum error. Then coarsely explored each parameter. The angular derivative constants being too high induced oscillations while the Potential value being too high induced an overshoot that caused it to loop over itself. I fixed it by finer exploration and then exploitation close to the minima of the cross track error. 
+
+Moreover I created a launch file to get the optimizer working, however, it only uses an internal basic model instead of using the simulation itself. I placed the simulation in the optimization loop so we could get accurate values of the optmization results. However I did not use the optimizer for the results produced in this assignment.
+
+# Extra Credit
+
