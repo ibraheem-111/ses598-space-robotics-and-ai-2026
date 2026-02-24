@@ -1,6 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, RegisterEventHandler, TimerAction
-from launch.event_handlers import OnProcessExit
+from launch.actions import ExecuteProcess, TimerAction
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 import os
@@ -11,69 +10,11 @@ def generate_launch_description():
     with open(urdf_model_path, 'r', encoding='utf-8') as urdf_file:
         robot_description = urdf_file.read()
 
-    create_cart_pole = Node(
-        package='ros_gz_sim',
-        executable='create',
-        arguments=[
-            '-file', urdf_model_path,
-            '-name', 'cart_pole',
-            '-allow_renaming', 'true'
-        ],
-        output='screen'
-    )
-
-    controller_group = [
-        Node(
-            package='cart_pole_optimal_control',
-            executable='state_republisher',
-            name='state_republisher',
-            output='screen'
-        ),
-        Node(
-            package='cart_pole_optimal_control',
-            executable='force_visualizer',
-            name='force_visualizer',
-            output='screen'
-        ),
-        Node(
-            package='cart_pole_optimal_control',
-            executable='lqr_controller',
-            name='lqr_controller',
-            output='screen'
-        ),
-        TimerAction(
-            period=1.8,
-            actions=[
-                Node(
-                    package='cart_pole_optimal_control',
-                    executable='earthquake_force_generator',
-                    name='earthquake_force_generator',
-                    output='screen',
-                    parameters=[{
-                        'base_amplitude': 15.0,
-                        'frequency_range': [0.5, 4.0],
-                        'update_rate': 50.0
-                    }]
-                ),
-            ]
-        ),
-    ]
-
     # Create and return launch description
     return LaunchDescription([
         # Gazebo (headless mode)
         ExecuteProcess(
-            cmd=[
-                'bash', '-lc',
-                'if command -v ign >/dev/null 2>&1; then '
-                'ign gazebo -r empty.sdf; '
-                'elif command -v gz >/dev/null 2>&1; then '
-                'gz sim -r empty.sdf; '
-                'else '
-                'echo "ERROR: Neither ign nor gz CLI found in PATH." >&2; '
-                'exit 127; '
-                'fi'
-            ],
+            cmd=['ign', 'gazebo', '-r', 'empty.sdf'],
             output='screen'
         ),
 
@@ -81,7 +22,16 @@ def generate_launch_description():
         TimerAction(
             period=2.5,
             actions=[
-                create_cart_pole,
+                Node(
+                    package='ros_gz_sim',
+                    executable='create',
+                    arguments=[
+                        '-file', urdf_model_path,
+                        '-name', 'cart_pole',
+                        '-allow_renaming', 'true'
+                    ],
+                    output='screen'
+                ),
             ]
         ),
 
@@ -111,16 +61,51 @@ def generate_launch_description():
                 'robot_description': robot_description,
                 'publish_frequency': 50.0,  # Increased update frequency
                 'use_tf_static': True,
-                'ignore_timestamp': False,
-                'use_sim_time': True
+                'ignore_timestamp': True
             }]
         ),
 
-        RegisterEventHandler(
-            OnProcessExit(
-                target_action=create_cart_pole,
-                on_exit=controller_group
-            )
+        # Start state/control nodes shortly after model spawn
+        TimerAction(
+            period=3.2,
+            actions=[
+                Node(
+                    package='cart_pole_optimal_control',
+                    executable='state_republisher',
+                    name='state_republisher',
+                    output='screen'
+                ),
+                Node(
+                    package='cart_pole_optimal_control',
+                    executable='force_visualizer',
+                    name='force_visualizer',
+                    output='screen'
+                ),
+                Node(
+                    package='cart_pole_optimal_control',
+                    executable='lqr_controller',
+                    name='lqr_controller',
+                    output='screen'
+                ),
+            ]
+        ),
+
+        # Inject disturbances after controller has had time to settle
+        TimerAction(
+            period=5.0,
+            actions=[
+                Node(
+                    package='cart_pole_optimal_control',
+                    executable='earthquake_force_generator',
+                    name='earthquake_force_generator',
+                    output='screen',
+                    parameters=[{
+                        'base_amplitude': 15.0,  # Strong force amplitude (realistic setting)
+                        'frequency_range': [0.5, 4.0],  # Wide frequency range (realistic setting)
+                        'update_rate': 50.0  # Update rate in Hz
+                    }]
+                ),
+            ]
         ),
 
         # RViz
@@ -131,8 +116,7 @@ def generate_launch_description():
             output='screen',
             arguments=['-d', os.path.join(pkg_share, 'config', 'cart_pole.rviz')],
             parameters=[{
-                'update_rate': 50.0,  # Match the publish frequency
-                'use_sim_time': True
+                'update_rate': 50.0  # Match the publish frequency
             }]
         )
     ]) 

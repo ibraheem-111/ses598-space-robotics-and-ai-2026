@@ -15,18 +15,6 @@ from datetime import datetime
 class CartPoleLQRController(Node):
     def __init__(self):
         super().__init__('cart_pole_lqr_controller')
-
-        self.declare_parameter('q_x', 10.5)
-        self.declare_parameter('q_x_dot', 10.5)
-        self.declare_parameter('q_theta', 12.0)
-        self.declare_parameter('q_theta_dot', 12.0)
-        self.declare_parameter('r', 0.4)
-        self.declare_parameter('max_simulation_time', 360.0)
-        self.declare_parameter('termination_grace_period', 1.0)
-        self.declare_parameter('enable_plot', True)
-        self.declare_parameter('auto_shutdown_on_finish', True)
-        self.declare_parameter('run_id', '')
-        self.declare_parameter('results_log_path', '~/ws_ses/lqr_experiments.csv')
         
         # System parameters
         self.M = 1.0  # Mass of cart (kg)
@@ -50,13 +38,8 @@ class CartPoleLQRController(Node):
         ])
         
         # LQR cost matrices
-        self.Q = np.diag([
-            float(self.get_parameter('q_x').value),
-            float(self.get_parameter('q_x_dot').value),
-            float(self.get_parameter('q_theta').value),
-            float(self.get_parameter('q_theta_dot').value),
-        ])
-        self.R = np.array([[float(self.get_parameter('r').value)]])
+        self.Q = np.diag([10.5, 10.5, 12.0, 12.0])  # State cost
+        self.R = np.array([[5]])  # Control cost
         
         # Compute LQR gain matrix
         self.K = self.compute_lqr_gain()
@@ -75,15 +58,13 @@ class CartPoleLQRController(Node):
         self.control_forces = deque()
         self.earthquake_forces = deque()
         self.start_time = None
-        self.termination_grace_period = float(self.get_parameter('termination_grace_period').value)
-        self.enable_plot = bool(self.get_parameter('enable_plot').value)
-        self.auto_shutdown_on_finish = bool(self.get_parameter('auto_shutdown_on_finish').value)
-        self.run_id = str(self.get_parameter('run_id').value)
-        self.finished = False
+        self.termination_grace_period = 1.0
         self._warned_pre_state_earthquake = False
 
-        self.results_log_path = os.path.expanduser(str(self.get_parameter('results_log_path').value))
-        os.makedirs(os.path.dirname(self.results_log_path), exist_ok=True)
+        log_dir = os.path.join(os.path.expanduser('~'), 'ws_ses')
+        if not os.path.isdir(log_dir):
+            log_dir = os.getcwd()
+        self.results_log_path = os.path.join(log_dir, 'lqr_experiments.csv')
         
         # Create publishers and subscribers
         self.cart_cmd_pub = self.create_publisher(Float64, '/model/cart_pole/joint/cart_to_base/cmd_force', 10)
@@ -103,7 +84,7 @@ class CartPoleLQRController(Node):
         # Control loop timer
         self.timer = self.create_timer(0.01, self.control_loop)
 
-        self.MAX_SIMULATION_TIME = float(self.get_parameter('max_simulation_time').value)
+        self.MAX_SIMULATION_TIME = 120.0  # Set to desired duration
         
         self.get_logger().info('Cart-Pole LQR Controller initialized')
     
@@ -180,7 +161,7 @@ class CartPoleLQRController(Node):
     def _append_experiment_log(self, metrics):
         """Append current parameters and outcomes to CSV log."""
         fieldnames = [
-            'timestamp', 'run_id', 'q_x', 'q_x_dot', 'q_theta', 'q_theta_dot', 'r',
+            'timestamp', 'q_x', 'q_x_dot', 'q_theta', 'q_theta_dot', 'r',
             'stable_duration_s', 'total_runtime_s', 'stable_ratio',
             'max_cart_displacement_m', 'max_pole_deviation_deg',
             'avg_control_effort_n', 'peak_control_effort_n',
@@ -189,7 +170,6 @@ class CartPoleLQRController(Node):
 
         row = {
             'timestamp': datetime.now().isoformat(timespec='seconds'),
-            'run_id': self.run_id,
             'q_x': float(self.Q[0, 0]),
             'q_x_dot': float(self.Q[1, 1]),
             'q_theta': float(self.Q[2, 2]),
@@ -237,9 +217,6 @@ class CartPoleLQRController(Node):
     def control_loop(self):
         """Compute and apply LQR control."""
         try:
-            if self.finished:
-                return
-
             if not self.state_initialized:
                 self.get_logger().warn('State not initialized yet')
                 return
@@ -270,13 +247,10 @@ class CartPoleLQRController(Node):
             timed_out = current_time >= self.MAX_SIMULATION_TIME
 
             if timed_out or (current_time >= self.termination_grace_period and unstable):
-                self.finished = True
                 self.get_logger().warn(f"Simulation ended: cart_x={self.x[0, 0]:.2f}m, pole_angle={np.degrees(self.x[2, 0]):.2f}°, duration={current_time:.2f}s")
                 self.print_metrics()
-                if self.enable_plot:
-                    self.plot_results()
-                if self.auto_shutdown_on_finish:
-                    rclpy.shutdown()
+                self.plot_results()
+                rclpy.shutdown()
                 return
 
         except Exception as e:
@@ -317,12 +291,9 @@ class CartPoleLQRController(Node):
 def main(args=None):
     rclpy.init(args=args)
     controller = CartPoleLQRController()
-    try:
-        rclpy.spin(controller)
-    finally:
-        controller.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    rclpy.spin(controller)
+    controller.destroy_node()
+    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
