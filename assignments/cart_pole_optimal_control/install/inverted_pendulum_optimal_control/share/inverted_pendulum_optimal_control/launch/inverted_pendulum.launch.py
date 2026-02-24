@@ -1,1 +1,0 @@
-/home/jdas/RAS-SES-598-Space-Robotics-and-AI/assignments/inverted_pendulum_optimal_control/build/inverted_pendulum_optimal_control/launch/inverted_pendulum.launch.py
