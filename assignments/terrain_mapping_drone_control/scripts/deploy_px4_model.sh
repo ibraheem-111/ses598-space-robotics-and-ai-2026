@@ -75,10 +75,17 @@ cp "$PACKAGE_DIR/models/px4_models/airframes/4022_gz_x500_depth_mono" \
 # cp "$PACKAGE_DIR/models/px4_models/airframes/4022_gz_x500_oaklite" \
 #    "$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/airframes/"
 
-# Copy CMakeLists.txt if it exists
-if [ -f "$PACKAGE_DIR/models/px4_models/airframes/CMakeLists.txt" ]; then
-    cp "$PACKAGE_DIR/models/px4_models/airframes/CMakeLists.txt" \
-       "$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/airframes/"
+# Ensure custom airframe is listed in PX4 CMakeLists.txt without replacing upstream content
+PX4_AIRFRAME_CMAKELISTS="$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt"
+if [ -f "$PX4_AIRFRAME_CMAKELISTS" ]; then
+    if ! grep -q "4022_gz_x500_depth_mono" "$PX4_AIRFRAME_CMAKELISTS"; then
+        echo "Adding 4022_gz_x500_depth_mono to PX4 airframe CMakeLists.txt"
+        sed -i '/^\s*4019_gz_x500_gimbal\s*$/a\	4022_gz_x500_depth_mono' "$PX4_AIRFRAME_CMAKELISTS"
+    else
+        echo "4022_gz_x500_depth_mono already present in PX4 airframe CMakeLists.txt"
+    fi
+else
+    echo "Warning: PX4 airframe CMakeLists.txt not found at $PX4_AIRFRAME_CMAKELISTS"
 fi
 
 # Copy Gazebo models

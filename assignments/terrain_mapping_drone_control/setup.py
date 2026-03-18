@@ -30,10 +30,6 @@ setup(
             glob('models/cylinder_small/materials/*.*')),
         ('share/' + package_name + '/models/cylinder_small/materials/textures',
             glob('models/cylinder_small/materials/textures/*.*')),
-        ('lib/' + package_name, [
-            'terrain_mapping_drone_control/cylinder_landing_node.py',
-            'terrain_mapping_drone_control/aruco_tracker.py'
-        ]),
         ('share/' + package_name + '/models/cylinder_short',
             glob('models/cylinder_short/*.*')),
         ('share/' + package_name + '/models/cylinder_short/materials',
@@ -51,7 +47,7 @@ setup(
     entry_points={
         'console_scripts': [
             'cylinder_landing_node = terrain_mapping_drone_control.cylinder_landing_node:main',
-            'px4_odom_converter = terrain_mapping_drone_control.px4_odom_converter:main',
+            'preprogrammed_mapping_landing = terrain_mapping_drone_control.preprogrammed_mapping_landing:main',
             'feature_tracker = terrain_mapping_drone_control.feature_tracker:main',
             'pose_visualizer = terrain_mapping_drone_control.pose_visualizer:main',
             'spiral_trajectory = terrain_mapping_drone_control.spiral_trajectory:main',

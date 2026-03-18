@@ -1,6 +1,6 @@
 # Assignment 3: Rocky Times Challenge - Search, Map, & Analyze
 
-This ROS2 package implements an autonomous drone system for geological feature detection, mapping, and analysis using an RGBD camera and PX4 SITL simulation.
+iiiiThis ROS2 package implements an autonomous drone system for geological feature detection, mapping, and analysis using an RGBD camera and PX4 SITL simulation.
 
 ## Challenge Overview
 
