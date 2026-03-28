@@ -30,7 +30,7 @@ def generate_launch_description():
     
     # Launch PX4 SITL with x500_depth
     px4_sitl = ExecuteProcess(
-        cmd=['make', 'px4_sitl', 'gz_x500_gimbal'],
+        cmd=['make', 'px4_sitl', 'gz_x500_depth_mono'],
         cwd=px4_autopilot_path,
         output='screen'
     )
@@ -80,6 +80,34 @@ def generate_launch_description():
     )
 
     # Bridge node for camera and odometry
+    # bridge = Node(
+    #     package='ros_gz_bridge',
+    #     executable='parameter_bridge',
+    #     name='bridge',
+    #     parameters=[{
+    #         'use_sim_time': True,
+    #     }],
+    #     arguments=[
+    #         # Camera topics (one-way from Gazebo to ROS)
+    #         '/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/image@sensor_msgs/msg/Image[gz.msgs.Image',
+    #         '/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
+    #         '/model/x500_gimbal_0/command/gimbal_roll@std_msgs/msg/Float64@gz.msgs.Double',
+    #         '/model/x500_gimbal_0/command/gimbal_pitch@std_msgs/msg/Float64@gz.msgs.Double',
+    #         '/model/x500_gimbal_0/command/gimbal_yaw@std_msgs/msg/Float64@gz.msgs.Double',
+    #         # PX4 odometry (one-way from Gazebo to ROS)
+    #         '/model/x500_gimbal_0/odometry_with_covariance@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+    #         # Clock (one-way from Gazebo to ROS)
+    #         '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+    #     ],
+    #     remappings=[
+    #         ('/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/image', '/drone_camera'),
+    #         ('/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/camera_info', '/drone_camera_info'),
+    #         ('/model/x500_gimbal_0/odometry_with_covariance', '/gz/vehicle_odometry'),
+    #     ],
+    #     output='screen'
+    # )
+
+    # Bridge node for camera and odometry
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
@@ -88,21 +116,41 @@ def generate_launch_description():
             'use_sim_time': True,
         }],
         arguments=[
-            # Camera topics (one-way from Gazebo to ROS)
-            '/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/image@sensor_msgs/msg/Image[gz.msgs.Image',
-            '/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
-            '/model/x500_gimbal_0/command/gimbal_roll@std_msgs/msg/Float64@gz.msgs.Double',
-            '/model/x500_gimbal_0/command/gimbal_pitch@std_msgs/msg/Float64@gz.msgs.Double',
-            '/model/x500_gimbal_0/command/gimbal_yaw@std_msgs/msg/Float64@gz.msgs.Double',
-            # PX4 odometry (one-way from Gazebo to ROS)
-            '/model/x500_gimbal_0/odometry_with_covariance@nav_msgs/msg/Odometry[gz.msgs.Odometry',
-            # Clock (one-way from Gazebo to ROS)
-            '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+            # Front RGB Camera
+            '/rgb_camera@sensor_msgs/msg/Image@gz.msgs.Image',
+            # '/rgb_camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            
+            # Front Depth Camera
+            '/depth_camera@sensor_msgs/msg/Image@gz.msgs.Image',
+            # '/depth_camera/depth_image@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/depth_camera/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked',
+            '/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            
+            # Down Mono Camera
+            '/mono_camera@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/mono_camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            
+            # Clock and Odometry
+            '/clock@rosgraph_msgs/msg/Clock@gz.msgs.Clock',
+            '/model/x500_depth_mono_0/odometry_with_covariance@nav_msgs/msg/Odometry@gz.msgs.OdometryWithCovariance',
         ],
         remappings=[
-            ('/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/image', '/drone_camera'),
-            ('/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/camera_info', '/drone_camera_info'),
-            ('/model/x500_gimbal_0/odometry_with_covariance', '/fmu/out/vehicle_odometry'),
+            # Front RGB Camera remappings
+            ('/rgb_camera', '/drone/front_rgb'),
+            # ('/rgb_camera/camera_info', '/drone/front_rgb/camera_info'),
+            
+            # Front Depth Camera remappings
+            ('/depth_camera', '/drone/front_depth'),
+            # ('/depth_camera/depth_image', '/drone/front_depth/depth'),
+            ('/depth_camera/points', '/drone/front_depth/points'),
+            ('/camera_info', '/drone/camera_info'),
+            
+            # Down Mono Camera remappings
+            ('/mono_camera', '/drone/down_mono'),
+            ('/mono_camera/camera_info', '/drone/down_mono/camera_info'),
+            
+            # Odometry remapping
+            ('/model/x500_depth_mono_0/odometry_with_covariance', '/rtabmap/odom'),
         ],
         output='screen'
     )
