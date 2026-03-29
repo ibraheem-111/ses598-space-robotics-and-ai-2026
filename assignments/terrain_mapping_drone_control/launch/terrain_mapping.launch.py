@@ -131,7 +131,8 @@ def generate_launch_description():
             '/mono_camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
             
             # Clock and Odometry
-            '/clock@rosgraph_msgs/msg/Clock@gz.msgs.Clock',
+            # '/world/default/clock@rosgraph_msgs/msg/Clock@gz.msgs.Clock',
+            'world/default/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
             '/model/x500_depth_mono_0/odometry_with_covariance@nav_msgs/msg/Odometry@gz.msgs.OdometryWithCovariance',
         ],
         remappings=[
@@ -148,6 +149,9 @@ def generate_launch_description():
             # Down Mono Camera remappings
             ('/mono_camera', '/drone/down_mono'),
             ('/mono_camera/camera_info', '/drone/down_mono/camera_info'),
+
+            # Gazebo clock remapping
+            ('/world/default/clock', 'gz/clock'),
             
             # Odometry remapping
             ('/model/x500_depth_mono_0/odometry_with_covariance', '/rtabmap/odom'),

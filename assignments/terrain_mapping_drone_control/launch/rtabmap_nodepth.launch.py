@@ -13,6 +13,16 @@ def generate_launch_description():
             description='Use simulation time'
         ),
 
+        Node(
+            package="terrain_mapping_drone_control",
+            executable="px4_vehicle_odometry_to_ros_odom",
+            name="px4_vehicle_odometry_to_ros_odom",
+            output="screen",
+            parameters=[{
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
+            }]
+        ),
+
         # Static TF publisher for camera to base link transform
         Node(
             package='tf2_ros',
@@ -20,7 +30,15 @@ def generate_launch_description():
             name='camera_to_base_link',
             arguments=['0.1', '0', '0.05', '0', '0', '0', 'base_link', 'camera_link'],
             output='screen'
-        ),  
+        ), 
+
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='odom_to_base_link',
+        #     arguments=['0.0', '0', '0.0', '0', '0', '0', 'odom', 'base_link'],
+        #     output='screen'
+        # ), 
 
         # RTAB-Map node
         Node(
@@ -33,7 +51,7 @@ def generate_launch_description():
                 
                 # RTAB-Map parameters
                 'frame_id': 'base_link',
-                'subscribe_depth': True,
+                'subscribe_depth': False,
                 'subscribe_rgb': True,
                 'approx_sync': True,
                 'queue_size': 10,
@@ -61,16 +79,19 @@ def generate_launch_description():
                 # Memory management
                 'memory_management': True,
                 'max_cloud_size': 50000,
-                'min_cluster_size': 100
+                'min_cluster_size': 100,
+
+                'publish_tf': True,
             }],
             remappings=[
                 # Camera topics
-                ('rgb/image', '/drone/front_rgb'),
-                ('depth/image', '/drone/front_depth'),
-                ('rgb/camera_info', '/drone/front_rgb/camera_info'),
+                ('rgb/image', '/drone_camera'),
+                # ('depth/image', '/drone/front_depth'),
+                ('rgb/camera_info', '/drone_camera_info'),
                 
                 # Odometry from PX4
                 ('odom', '/rtabmap/odom'),
+                # ('odom_info', '/fmu/out/vehicle_odometry_info'),
                 
                 # Output topics
                 ('grid_map', 'map'),
@@ -81,26 +102,26 @@ def generate_launch_description():
         ),
 
         # RTAB-Map point cloud generation
-        Node(
-            package='rtabmap_util',
-            executable='point_cloud_xyz',
-            name='point_cloud_xyz',
-            parameters=[{
-                'use_sim_time': LaunchConfiguration('use_sim_time'),
-                'decimation': 4,
-                'voxel_size': 0.02,
-                'max_depth': 4.0,
-                'min_depth': 0.4
-            }],
-            remappings=[
-                ('depth/image', '/drone/front_depth'),
-                ('depth/camera_info', '/drone/front_depth/camera_info'),
-                ('cloud', 'cloud_xyz')
-            ]
-        ),
+        # Node(
+        #     package='rtabmap_util',
+        #     executable='point_cloud_xyz',
+        #     name='point_cloud_xyz',
+        #     parameters=[{
+        #         'use_sim_time': LaunchConfiguration('use_sim_time'),
+        #         'decimation': 4,
+        #         'voxel_size': 0.02,
+        #         'max_depth': 4.0,
+        #         'min_depth': 0.4
+        #     }],
+        #     remappings=[
+        #         # ('depth/image', '/drone/front_depth'),
+        #         # ('depth/camera_info', '/drone/front_depth/camera_info'),
+        #         ('cloud', 'cloud_xyz')
+        #     ]
+        # ),
 
         # Log info
         LogInfo(
-            msg="RTAB-Map launched with drone configuration"
+            msg="RTAB-Map launched with drone configuration for no depth input"
         )
     ]) 
