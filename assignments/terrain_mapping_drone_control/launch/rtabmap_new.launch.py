@@ -42,7 +42,7 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_to_oakd_base_link',
-            arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'OakD-Lite-Modify/base_link'],
+            arguments=['0', '0', '0', '-1.57079632679', '0', '-1.57079632679', 'base_link', 'OakD-Lite-Modify/base_link'],
             output='screen'
         ),
 
