@@ -32,15 +32,20 @@ class CylinderMission(Node):
         # ---------------------------------------------
         # Parameters
         # ---------------------------------------------
-        self.declare_parameter('orbit_center_x', 0.0)
-        self.declare_parameter('orbit_center_y', 0.0)
-        self.declare_parameter('orbit_min_z_ned', -20.0)
-        self.declare_parameter('radius', 5.0)
-        self.declare_parameter('orbit_climb_step_ned', -0.0025)  # per control tick; negative climbs in NED
-        self.declare_parameter('tangential_speed', 0.35)         # m/s along the circle
-        self.declare_parameter('control_period', 0.05)           # 20 Hz offboard setpoints
-        self.declare_parameter('circle_entry_tolerance', 0.75)   # m radial tolerance before starting spiral motion
-        self.declare_parameter('dtheta', 0.1)                    # fixed angle step for spiral (radians)
+        self.declare_parameter('orbit_center_x', 0.0)          # odom frame
+        self.declare_parameter('orbit_center_y', 0.0)          # odom frame
+        self.declare_parameter('radius', 5.0)                  # meters
+        self.declare_parameter('takeoff_altitude_ned', -5.0)   # PX4-style NED z
+        self.declare_parameter('orbit_min_z_ned', -20.0)       # more negative = higher in NED
+        self.declare_parameter('tangential_speed', 0.18)       # m/s around cylinder
+        self.declare_parameter('vertical_speed_ned', float('nan'))
+        self.declare_parameter('orbit_climb_step_ned', float('nan'))  # legacy alias, now interpreted as m/s
+        self.declare_parameter('tangential_accel', 0.06)       # m/s^2 ramp for smooth start
+        self.declare_parameter('vertical_accel', 0.02)         # m/s^2 ramp for smooth climb
+        self.declare_parameter('control_period', 0.05)         # 20 Hz setpoint stream
+        self.declare_parameter('circle_entry_speed', 0.30)     # m/s while joining circle
+        self.declare_parameter('circle_entry_tolerance', 0.25) # meters
+        self.declare_parameter('yaw_inward', True)
 
         # ---------------------------------------------
         # PX4 / Offboard QoS
@@ -49,7 +54,7 @@ class CylinderMission(Node):
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1
+            depth=1,
         )
 
         # ---------------------------------------------
@@ -90,17 +95,23 @@ class CylinderMission(Node):
         )
 
         # ---------------------------------------------
-        # Internal state
+        # Timing / state
         # ---------------------------------------------
-        self.state = 'WAIT_INTRINSICS'
-        self.offboard_setpoint_counter = 0
         self.control_period = float(self.get_parameter('control_period').value)
         self.timer = self.create_timer(self.control_period, self.timer_callback)
+        self.offboard_setpoint_counter = 0
+        self.offboard_warmup_cycles = max(10, math.ceil(1.2 / self.control_period))
+        self.state = 'WAIT_INTRINSICS'
+        self.armed = False
+        self.last_offboard_reassert_time = 0.0
+        self.offboard_reassert_period_sec = 0.5
 
-        self.position = [0.0, 0.0, 0.0]  # vehicle_odometry frame (the Gazebo-synced frame you want to use)
+        # ---------------------------------------------
+        # Vehicle state
+        # ---------------------------------------------
+        self.position = [0.0, 0.0, 0.0]  # vehicle_odometry frame (Gazebo-synced frame)
         self.odom_pose_frame = None
         self.bridge = CvBridge()
-        self.armed = False
 
         # Camera intrinsics
         self.fx = None
@@ -108,31 +119,43 @@ class CylinderMission(Node):
         self.cx = None
         self.cy = None
 
-        # Spiral flight parameters (defined in your odometry/Gazebo frame)
-        self.circle_radius = float(self.get_parameter('radius').value)
-        self.altitude = -5.0
+        # ---------------------------------------------
+        # Helix / spiral parameters (defined in odom frame)
+        # ---------------------------------------------
         self.orbit_center_x = float(self.get_parameter('orbit_center_x').value)
         self.orbit_center_y = float(self.get_parameter('orbit_center_y').value)
-        self.orbit_climb_step_ned = float(self.get_parameter('orbit_climb_step_ned').value)
+        self.circle_radius = float(self.get_parameter('radius').value)
+        self.takeoff_altitude_ned = float(self.get_parameter('takeoff_altitude_ned').value)
         self.orbit_min_z_ned = float(self.get_parameter('orbit_min_z_ned').value)
-        self.tangential_speed = float(self.get_parameter('tangential_speed').value)
+        self.tangential_speed_target = float(self.get_parameter('tangential_speed').value)
+        self.tangential_accel = float(self.get_parameter('tangential_accel').value)
+        self.vertical_accel = float(self.get_parameter('vertical_accel').value)
+        self.circle_entry_speed = float(self.get_parameter('circle_entry_speed').value)
         self.circle_entry_tolerance = float(self.get_parameter('circle_entry_tolerance').value)
-        self.circle_ready = False
-        self.circle_entry_logged = False
-        self.aruco_hover_target_xy = None
-        self.dtheta = float(self.get_parameter('dtheta').value)
-        # Mission mode
-        self.single_cylinder_mode = True
-        self.aruco_stable_required_sec = 2.0
-        self.aruco_detection_loss_timeout_sec = 1.2
-        self.aruco_first_seen_time = None
-        self.aruco_last_seen_time = None
-        self.aruco_detection_count = 0
-        self.aruco_detection_count_required = 3
-        self.last_offboard_reassert_time = 0.0
-        self.offboard_reassert_period_sec = 0.5
+        self.yaw_inward = bool(self.get_parameter('yaw_inward').value)
 
+        vertical_speed_param = float(self.get_parameter('vertical_speed_ned').value)
+        legacy_vertical_speed_param = float(self.get_parameter('orbit_climb_step_ned').value)
+        if math.isfinite(vertical_speed_param):
+            self.vertical_speed_target_ned = vertical_speed_param
+        elif math.isfinite(legacy_vertical_speed_param):
+            self.vertical_speed_target_ned = legacy_vertical_speed_param
+        else:
+            self.vertical_speed_target_ned = -0.02
+
+        self.altitude = self.takeoff_altitude_ned
+        self.helix_theta = 0.0
+        self.helix_z = self.takeoff_altitude_ned
+        self.helix_initialized = False
+        self.helix_entry_logged = False
+        self.current_tangential_speed = 0.0
+        self.current_vertical_speed_ned = 0.0
+        self.aruco_hover_target_xy = None
+
+        # ---------------------------------------------
         # Cylinder detection and measurement
+        # ---------------------------------------------
+        self.single_cylinder_mode = True
         self.measured_cylinders = []
         self.points_buffer = []
         self.sample_threshold = 10
@@ -143,35 +166,69 @@ class CylinderMission(Node):
         self.min_pixel_area = 5000
         self.detection_cooldown_until = 0.0
 
-        # Landing / ArUco
+        # ---------------------------------------------
+        # ArUco / mission transitions
+        # ---------------------------------------------
+        self.aruco_stable_required_sec = 2.0
+        self.aruco_detection_loss_timeout_sec = 1.2
+        self.aruco_first_seen_time = None
+        self.aruco_last_seen_time = None
+        self.aruco_detection_count = 0
+        self.aruco_detection_count_required = 3
         self.markers = {}
         self.land_target = None
         self.aruco_hover_start_time = None
 
-        # Logging mission details
+        # ---------------------------------------------
+        # Logging / battery
+        # ---------------------------------------------
         self.start_time = None
         self.battery_percent = None
-        self.initial_battery = None
         self.battery_at_mission_start = None
         self.battery_at_mission_end = None
 
     # ---------------------------------------------
-    # Battery logging
+    # Utility helpers
+    # ---------------------------------------------
+    @staticmethod
+    def wrap_pi(angle):
+        return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+    @staticmethod
+    def move_scalar_toward(current, target, max_step):
+        delta = target - current
+        if abs(delta) <= max_step:
+            return target
+        return current + math.copysign(max_step, delta)
+
+    @staticmethod
+    def move_xy_toward(current_x, current_y, target_x, target_y, max_step):
+        dx = target_x - current_x
+        dy = target_y - current_y
+        dist = math.hypot(dx, dy)
+        if dist <= max_step or dist < 1e-9:
+            return target_x, target_y
+        scale = max_step / dist
+        return current_x + dx * scale, current_y + dy * scale
+
+    @staticmethod
+    def ramp_toward(current, target, max_delta):
+        delta = target - current
+        if abs(delta) <= max_delta:
+            return target
+        return current + math.copysign(max_delta, delta)
+
+    # ---------------------------------------------
+    # PX4 callbacks
     # ---------------------------------------------
     def battery_cb(self, msg):
         if not math.isnan(msg.volt_based_soc_estimate):
             self.battery_percent = msg.volt_based_soc_estimate
 
-    # ---------------------------------------------
-    # Callback: Vehicle Odometry
-    # ---------------------------------------------
     def odom_cb(self, msg):
         self.position = [msg.position[0], msg.position[1], msg.position[2]]
         self.odom_pose_frame = msg.pose_frame
 
-    # ---------------------------------------------
-    # Callback: Camera Info (intrinsics)
-    # ---------------------------------------------
     def caminfo_callback(self, msg):
         self.fx = msg.k[0]
         self.fy = msg.k[4]
@@ -184,11 +241,30 @@ class CylinderMission(Node):
             self.caminfo_sub = None
 
     # ---------------------------------------------
-    # Frame conversion
+    # Frame conversion: odom frame -> PX4 local NED
     # ---------------------------------------------
     def odom_to_px4_ned(self, x_odom, y_odom, z_odom):
-        # Based on your measured mapping: odom x/y are swapped relative to PX4 local position.
+        # Per your measured relationship, odom x/y are swapped relative to PX4 local frame.
+        # Signs intentionally unchanged.
         return float(y_odom), float(x_odom), float(z_odom)
+
+    def yaw_to_center_from_odom(self, x_odom, y_odom):
+        cx_ned, cy_ned, _ = self.odom_to_px4_ned(self.orbit_center_x, self.orbit_center_y, 0.0)
+        px_ned, py_ned, _ = self.odom_to_px4_ned(x_odom, y_odom, 0.0)
+        return math.atan2(cy_ned - py_ned, cx_ned - px_ned)
+
+    # ---------------------------------------------
+    # PX4 publishing
+    # ---------------------------------------------
+    def publish_offboard_control_mode(self):
+        msg = OffboardControlMode()
+        msg.position = True
+        msg.velocity = False
+        msg.acceleration = False
+        msg.attitude = False
+        msg.body_rate = False
+        msg.timestamp = self.get_clock().now().nanoseconds // 1000
+        self.offboard_control_mode_pub.publish(msg)
 
     def publish_odom_trajectory_setpoint(self, x=0.0, y=0.0, z=0.0, yaw=None):
         x_ned, y_ned, z_ned = self.odom_to_px4_ned(x, y, z)
@@ -203,66 +279,121 @@ class CylinderMission(Node):
         msg.timestamp = self.get_clock().now().nanoseconds // 1000
         self.trajectory_pub.publish(msg)
 
-    def yaw_to_center_ned(self, current_x_odom, current_y_odom):
-        cx_ned, cy_ned, _ = self.odom_to_px4_ned(self.orbit_center_x, self.orbit_center_y, 0.0)
-        px_ned, py_ned, _ = self.odom_to_px4_ned(current_x_odom, current_y_odom, 0.0)
-        return math.atan2(cy_ned - py_ned, cx_ned - px_ned)
+    def publish_vehicle_command(self, command, param1=0.0, param2=0.0):
+        msg = VehicleCommand()
+        msg.param1 = float(param1)
+        msg.param2 = float(param2)
+        msg.command = command
+        msg.target_system = 1
+        msg.target_component = 1
+        msg.source_system = 1
+        msg.source_component = 1
+        msg.from_external = True
+        msg.timestamp = self.get_clock().now().nanoseconds // 1000
+        self.vehicle_cmd_pub.publish(msg)
+
+    def arm(self):
+        self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0)
+        self.get_logger().info('Arm command sent')
+        self.armed = True
+
+    def engage_offboard_mode(self):
+        self.publish_vehicle_command(
+            VehicleCommand.VEHICLE_CMD_DO_SET_MODE,
+            param1=1.0,
+            param2=6.0,
+        )
+        self.get_logger().info('Offboard mode command sent')
 
     # ---------------------------------------------
-    # Spiral controller
+    # Helix state management
     # ---------------------------------------------
-    def publish_spiral_setpoint(self):
+    def reset_helix(self):
+        self.helix_initialized = False
+        self.helix_entry_logged = False
+        self.current_tangential_speed = 0.0
+        self.current_vertical_speed_ned = 0.0
+        self.helix_z = self.altitude
+
+    def publish_smooth_helix_setpoint(self):
         cx = self.orbit_center_x
         cy = self.orbit_center_y
         px = float(self.position[0])
         py = float(self.position[1])
+        pz = float(self.position[2])
+        dt = self.control_period
 
         dx = px - cx
         dy = py - cy
         r_now = math.hypot(dx, dy)
 
         if r_now < 1e-6:
-            theta_now = 0.0
-            ux, uy = 1.0, 0.0
+            entry_theta = 0.0
+            ux = 1.0
+            uy = 0.0
         else:
-            theta_now = math.atan2(dy, dx)
+            entry_theta = math.atan2(dy, dx)
             ux = dx / r_now
             uy = dy / r_now
 
-        yaw_ned = self.yaw_to_center_ned(px, py)
-        # yaw
+        entry_x = cx + self.circle_radius * ux
+        entry_y = cy + self.circle_radius * uy
+        entry_z = self.altitude
 
-        # First, move to the nearest point on the desired circle.
-        # if abs(r_now - self.circle_radius) > self.circle_entry_tolerance:
-        #     x_cmd = cx + self.circle_radius * ux
-        #     y_cmd = cy + self.circle_radius * uy
-        #     z_cmd = self.altitude
-        #     self.circle_ready = False
-        #     if not self.circle_entry_logged:
-        #         self.get_logger().info(
-        #             f'Entering circle first: current radius={r_now:.2f} m, target radius={self.circle_radius:.2f} m'
-        #         )
-        #         self.circle_entry_logged = True
-        # else:
-        if not self.circle_ready:
-            self.get_logger().info('On circle. Starting slow spiral.')
-        self.circle_ready = True
-        self.circle_entry_logged = False
+        if not self.helix_initialized:
+            xy_step = self.circle_entry_speed * dt
+            z_step = max(abs(self.vertical_speed_target_ned), 0.10) * dt
 
-        # dtheta = abs(self.tangential_speed) / max(self.circle_radius, 0.05)
-        dtheta = self.dtheta
+            x_cmd, y_cmd = self.move_xy_toward(px, py, entry_x, entry_y, xy_step)
+            z_cmd = self.move_scalar_toward(pz, entry_z, z_step)
+            yaw_cmd = self.yaw_to_center_from_odom(x_cmd, y_cmd) if self.yaw_inward else None
+            self.publish_odom_trajectory_setpoint(x_cmd, y_cmd, z_cmd, yaw=yaw_cmd)
 
-        theta_cmd = theta_now + dtheta
-        x_cmd = cx + self.circle_radius * math.cos(theta_cmd)
-        y_cmd = cy + self.circle_radius * math.sin(theta_cmd)
+            entry_error_xy = math.hypot(px - entry_x, py - entry_y)
+            entry_error_z = abs(pz - entry_z)
 
-        # self.altitude = max(self.orbit_min_z_ned, self.altitude + self.orbit_climb_step_ned)
-        z_cmd = self.altitude
+            if not self.helix_entry_logged:
+                self.get_logger().info(
+                    f'Joining helix smoothly: current_radius={r_now:.2f} m, '
+                    f'target_radius={self.circle_radius:.2f} m'
+                )
+                self.helix_entry_logged = True
 
+            if entry_error_xy <= self.circle_entry_tolerance and entry_error_z <= 0.25:
+                self.helix_initialized = True
+                self.helix_theta = entry_theta
+                self.helix_z = entry_z
+                self.current_tangential_speed = 0.0
+                self.current_vertical_speed_ned = 0.0
+                self.get_logger().info('On entry circle. Beginning smooth helical scan.')
+            return
 
-        self._logger.info(f'Spiral setpoint: theta={theta_cmd:.2f}, x={x_cmd:.2f}, y={y_cmd:.2f}, z={z_cmd:.2f}, yaw_ned={math.degrees(yaw_ned):.1f} deg')    
+        self.current_tangential_speed = self.ramp_toward(
+            self.current_tangential_speed,
+            self.tangential_speed_target,
+            self.tangential_accel * dt,
+        )
+        self.current_vertical_speed_ned = self.ramp_toward(
+            self.current_vertical_speed_ned,
+            self.vertical_speed_target_ned,
+            self.vertical_accel * dt,
+        )
 
-        self.publish_odom_trajectory_setpoint(x_cmd, y_cmd, z_cmd, yaw=yaw_ned)
+        omega = self.current_tangential_speed / max(self.circle_radius, 0.1)
+        self.helix_theta = self.wrap_pi(self.helix_theta + omega * dt)
+
+        next_z = self.helix_z + self.current_vertical_speed_ned * dt
+        if self.current_vertical_speed_ned < 0.0:
+            self.helix_z = max(self.orbit_min_z_ned, next_z)
+        else:
+            self.helix_z = min(self.orbit_min_z_ned, next_z)
+
+        x_cmd = cx + self.circle_radius * math.cos(self.helix_theta)
+        y_cmd = cy + self.circle_radius * math.sin(self.helix_theta)
+        z_cmd = self.helix_z
+        yaw_cmd = self.yaw_to_center_from_odom(x_cmd, y_cmd) if self.yaw_inward else None
+
+        self.publish_odom_trajectory_setpoint(x_cmd, y_cmd, z_cmd, yaw=yaw_cmd)
 
     # ---------------------------------------------
     # Callback: Synchronized Image + Depth
@@ -289,7 +420,7 @@ class CylinderMission(Node):
         object_mask = cv2.morphologyEx(
             object_mask.astype(np.uint8),
             cv2.MORPH_CLOSE,
-            np.ones((5, 5), np.uint8)
+            np.ones((5, 5), np.uint8),
         )
 
         contours, _ = cv2.findContours(object_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -319,7 +450,7 @@ class CylinderMission(Node):
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     (0, 255, 0),
-                    1
+                    1,
                 )
 
                 if self.state == 'CIRCLE' and not self.single_cylinder_mode:
@@ -335,6 +466,7 @@ class CylinderMission(Node):
     # ---------------------------------------------
     def aruco_cb(self, msg):
         import re
+
         match = re.match(r'Marker (\d+) detected at x:([-\d.]+)m, y:([-\d.]+)m, z:([-\d.]+)m', msg.data)
         if match:
             now = time.time()
@@ -384,13 +516,13 @@ class CylinderMission(Node):
             self.last_offboard_reassert_time = now
 
     # ---------------------------------------------
-    # Timer Callback: Main State Machine
+    # Main state machine
     # ---------------------------------------------
     def timer_callback(self):
         self.publish_offboard_control_mode()
 
         if self.state != 'WAIT_INTRINSICS':
-            if not self.armed and self.offboard_setpoint_counter == 10:
+            if not self.armed and self.offboard_setpoint_counter >= self.offboard_warmup_cycles:
                 self.engage_offboard_mode()
                 self.arm()
             self.offboard_setpoint_counter += 1
@@ -404,36 +536,35 @@ class CylinderMission(Node):
                     )
 
                 self.get_logger().info('Intrinsics and battery OK. Moving to ARM_TAKEOFF.')
-                self.state = 'CIRCLE'
+                self.state = 'ARM_TAKEOFF'
                 self.start_time = time.time()
 
-        # elif self.state == 'ARM_TAKEOFF':
-        #     target = [0.0, 0.0, -5.0]
-        #     self.altitude = target[2]
-        #     self.publish_odom_trajectory_setpoint(*target, yaw=None)
+        elif self.state == 'ARM_TAKEOFF':
+            target = [0.0, 0.0, self.takeoff_altitude_ned]
+            self.altitude = target[2]
+            yaw_cmd = self.yaw_to_center_from_odom(target[0], target[1]) if self.yaw_inward else None
+            self.publish_odom_trajectory_setpoint(*target, yaw=yaw_cmd)
 
-        #     dx = self.position[0] - target[0]
-        #     dy = self.position[1] - target[1]
-        #     dz = self.position[2] - target[2]
-        #     dist = math.sqrt(dx ** 2 + dy ** 2 + dz ** 2)
+            dx = self.position[0] - target[0]
+            dy = self.position[1] - target[1]
+            dz = self.position[2] - target[2]
+            dist = math.sqrt(dx ** 2 + dy ** 2 + dz ** 2)
 
-        #     if dist < 0.5:
-        #         self.get_logger().info('Vertical in-place takeoff complete. Switching to CIRCLE.')
-        #         self.circle_ready = False
-        #         self.circle_entry_logged = False
-        #         self.state = 'CIRCLE'
+            if dist < 0.4:
+                self.get_logger().info('Vertical in-place takeoff complete. Switching to CIRCLE.')
+                self.reset_helix()
+                self.state = 'CIRCLE'
 
         elif self.state == 'CIRCLE':
-            self.publish_spiral_setpoint()
+            self.publish_smooth_helix_setpoint()
 
             if self.aruco_is_stably_detected():
                 self.get_logger().info(
                     f'ArUco stable for {self.aruco_stable_required_sec:.1f}s. '
-                    f'Exiting spiral and moving to ARUCO_HOVER.'
+                    f'Exiting helix and moving to ARUCO_HOVER.'
                 )
                 self.aruco_hover_target_xy = [float(self.position[0]), float(self.position[1])]
                 self.aruco_hover_start_time = None
-                self.reassert_offboard_if_needed()
                 self.state = 'ARUCO_HOVER'
 
         elif self.state == 'SERVO':
@@ -450,11 +581,11 @@ class CylinderMission(Node):
                     self.get_logger().warn('Object not found within timeout. Returning to CIRCLE.')
                     self.points_buffer.clear()
                     self.servo_start_time = None
-                    self.circle_ready = False
-                    self.circle_entry_logged = False
+                    self.reset_helix()
                     self.state = 'CIRCLE'
                 else:
-                    self.publish_odom_trajectory_setpoint(self.position[0], self.position[1], self.altitude)
+                    yaw_cmd = self.yaw_to_center_from_odom(self.position[0], self.position[1]) if self.yaw_inward else None
+                    self.publish_odom_trajectory_setpoint(self.position[0], self.position[1], self.altitude, yaw=yaw_cmd)
             else:
                 distance_error = self.desired_distance - current_distance
                 drone_x, drone_y, _ = self.position
@@ -464,16 +595,18 @@ class CylinderMission(Node):
                 target_x = drone_x - dx
                 target_y = drone_y
                 target_z = self.altitude
-                self.publish_odom_trajectory_setpoint(target_x, target_y, target_z)
+                yaw_cmd = self.yaw_to_center_from_odom(target_x, target_y) if self.yaw_inward else None
+                self.publish_odom_trajectory_setpoint(target_x, target_y, target_z, yaw=yaw_cmd)
 
                 if abs(distance_error) < self.distance_tolerance:
-                    self.get_logger().info('Reached ~15m from cylinder. Going to HOVER to measure.')
+                    self.get_logger().info('Reached desired stand-off distance. Going to HOVER to measure.')
                     self.hover_start_time = time.time()
                     self.servo_start_time = None
                     self.state = 'HOVER'
 
         elif self.state == 'HOVER':
-            self.publish_odom_trajectory_setpoint(self.position[0], self.position[1], self.altitude)
+            yaw_cmd = self.yaw_to_center_from_odom(self.position[0], self.position[1]) if self.yaw_inward else None
+            self.publish_odom_trajectory_setpoint(self.position[0], self.position[1], self.altitude, yaw=yaw_cmd)
 
             if self.hover_start_time is None:
                 self.hover_start_time = time.time()
@@ -486,6 +619,7 @@ class CylinderMission(Node):
                         'Single-cylinder mode active. Skipping dimension matching and switching to ARUCO_HOVER.'
                     )
                     self.aruco_hover_target_xy = [float(self.position[0]), float(self.position[1])]
+                    self.aruco_hover_start_time = None
                     self.state = 'ARUCO_HOVER'
                     return
 
@@ -508,21 +642,20 @@ class CylinderMission(Node):
 
                     if dimension_matched:
                         self.get_logger().info(
-                            'This cylinder matches a previously seen one. Mission done, landing.'
+                            'This cylinder matches a previously seen one. Mission done, landing path next.'
                         )
                         self.aruco_hover_target_xy = [float(self.position[0]), float(self.position[1])]
+                        self.aruco_hover_start_time = None
                         self.state = 'ARUCO_HOVER'
                     else:
-                        self.get_logger().info('New cylinder dimension recorded. Resuming circle flight.')
+                        self.get_logger().info('New cylinder dimension recorded. Resuming helical scan.')
                         self.measured_cylinders.append((median_w, median_h))
                         self.detection_cooldown_until = time.time() + 6.0
-                        self.circle_ready = False
-                        self.circle_entry_logged = False
+                        self.reset_helix()
                         self.state = 'CIRCLE'
                 else:
-                    self.get_logger().warn('No data in points_buffer. Resuming circle anyway.')
-                    self.circle_ready = False
-                    self.circle_entry_logged = False
+                    self.get_logger().warn('No data in points_buffer. Resuming helix anyway.')
+                    self.reset_helix()
                     self.state = 'CIRCLE'
 
         elif self.state == 'ARUCO_HOVER':
@@ -531,37 +664,44 @@ class CylinderMission(Node):
             if self.aruco_hover_target_xy is None:
                 self.aruco_hover_target_xy = [float(self.position[0]), float(self.position[1])]
 
-            self.publish_odom_trajectory_setpoint(
-                x=self.aruco_hover_target_xy[0],
-                y=self.aruco_hover_target_xy[1],
-                z=-20.0,
-                yaw=None,
-            )
+            target_x, target_y = self.aruco_hover_target_xy
+            target_z = self.orbit_min_z_ned
+            yaw_cmd = self.yaw_to_center_from_odom(target_x, target_y) if self.yaw_inward else None
+            self.publish_odom_trajectory_setpoint(target_x, target_y, target_z, yaw=yaw_cmd)
 
             if self.aruco_hover_start_time is None:
-                if abs(self.position[2] + 20.0) < 0.3:
+                pos_err = math.sqrt(
+                    (self.position[0] - target_x) ** 2 +
+                    (self.position[1] - target_y) ** 2 +
+                    (self.position[2] - target_z) ** 2
+                )
+                if pos_err < 0.4:
                     self.aruco_hover_start_time = time.time()
-                    self.get_logger().info('Reached hover height. Holding for 5 seconds...')
+                    self.get_logger().info('Reached hover point. Holding for 5 seconds...')
+
             elif time.time() - self.aruco_hover_start_time >= 5.0:
                 self.get_logger().info('5s ArUco hover complete. Selecting marker...')
                 self.state = 'ARUCO_SELECT'
 
         elif self.state == 'ARUCO_SELECT':
-            if len(self.markers) >= 1:
-                best_marker_id = None
-                min_z = float('inf')
-                for mid, (mx, my, mz) in self.markers.items():
-                    if mz < min_z:
-                        min_z = mz
-                        best_marker_id = mid
-                if best_marker_id is not None:
-                    dx, dy, dz = self.markers[best_marker_id]
-                    self.land_target = [dx, dy, -abs(20.0 - dz)]
-                    self.get_logger().info(
-                        f'Selected Marker {best_marker_id} for landing at '
-                        f'x={dx:.2f}, y={dy:.2f}, z={-abs(20.0 - dz):.2f}'
-                    )
-                    self.state = 'ARUCO_MOVE'
+            if not self.markers:
+                self.get_logger().warn('No ArUco markers available yet.')
+                return
+
+            best_marker_id = None
+            min_z = float('inf')
+            for marker_id, (_, _, mz) in self.markers.items():
+                if mz < min_z:
+                    min_z = mz
+                    best_marker_id = marker_id
+
+            dx, dy, dz = self.markers[best_marker_id]
+            self.land_target = [dx, dy, -abs(abs(self.orbit_min_z_ned) - dz)]
+            self.get_logger().info(
+                f'Selected Marker {best_marker_id} for landing at '
+                f'x={dx:.2f}, y={dy:.2f}, z={self.land_target[2]:.2f}'
+            )
+            self.state = 'ARUCO_MOVE'
 
         elif self.state == 'ARUCO_MOVE':
             self.reassert_offboard_if_needed()
@@ -571,7 +711,7 @@ class CylinderMission(Node):
                 return
 
             x, y, z = self.land_target
-            self.publish_odom_trajectory_setpoint(x=x, y=y, z=z)
+            self.publish_odom_trajectory_setpoint(x=x, y=y, z=z, yaw=None)
             dist = math.sqrt(
                 (self.position[0] - x) ** 2 +
                 (self.position[1] - y) ** 2 +
@@ -585,7 +725,8 @@ class CylinderMission(Node):
         elif self.state == 'ARUCO_LAND':
             self.get_logger().info('Landed successfully. Disarming...')
             self.publish_vehicle_command(
-                VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0
+                VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM,
+                param1=0.0,
             )
             self.state = 'COMPLETE'
 
@@ -594,9 +735,7 @@ class CylinderMission(Node):
 
             if self.battery_at_mission_end is None and self.battery_percent is not None:
                 self.battery_at_mission_end = self.battery_percent
-                self.get_logger().info(
-                    f'Captured battery_at_mission_end: {self.battery_at_mission_end:.4f}'
-                )
+                self.get_logger().info(f'Captured battery_at_mission_end: {self.battery_at_mission_end:.4f}')
 
             if self.start_time is not None:
                 mission_duration = time.time() - self.start_time
@@ -613,45 +752,7 @@ class CylinderMission(Node):
         elif self.state == 'DONE':
             rclpy.shutdown()
 
-    # ---------------------------------------------
-    # PX4 command / offboard helpers
-    # ---------------------------------------------
-    def publish_offboard_control_mode(self):
-        msg = OffboardControlMode()
-        msg.position = True
-        msg.velocity = False
-        msg.acceleration = False
-        msg.attitude = False
-        msg.body_rate = False
-        msg.timestamp = self.get_clock().now().nanoseconds // 1000
-        self.offboard_control_mode_pub.publish(msg)
-
-    def publish_vehicle_command(self, command, param1=0.0, param2=0.0):
-        msg = VehicleCommand()
-        msg.param1 = float(param1)
-        msg.param2 = float(param2)
-        msg.command = command
-        msg.target_system = 1
-        msg.target_component = 1
-        msg.source_system = 1
-        msg.source_component = 1
-        msg.from_external = True
-        msg.timestamp = self.get_clock().now().nanoseconds // 1000
-        self.vehicle_cmd_pub.publish(msg)
-
-    def arm(self):
-        self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0)
-        self.get_logger().info('Arm command sent')
-        self.armed = True
-
-    def engage_offboard_mode(self):
-        self.publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_DO_SET_MODE,
-            param1=1.0,
-            param2=6.0
-        )
-        self.get_logger().info('Offboard mode command sent')
-
+    
 
 def main(args=None):
     rclpy.init(args=args)
