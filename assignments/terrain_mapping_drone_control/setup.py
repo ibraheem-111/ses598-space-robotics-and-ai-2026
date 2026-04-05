@@ -54,6 +54,8 @@ setup(
             'aruco_tracker = terrain_mapping_drone_control.aruco_tracker:main',
             'px4_vehicle_odometry_to_ros_odom = terrain_mapping_drone_control.px4_vehicle_odometry_to_ros_odom:main',
             'auto_detect_land = terrain_mapping_drone_control.auto_detect_land:main',
+            'orbit_command = terrain_mapping_drone_control.orbit_command:main',
+            'fixed_waypoint_land_mission = terrain_mapping_drone_control.fixed_waypoint_land_mission:main',
         ],
     },
     python_requires='>=3.8'

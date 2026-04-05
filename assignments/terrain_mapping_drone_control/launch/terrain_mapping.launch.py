@@ -159,6 +159,16 @@ def generate_launch_description():
         output='screen'
     )
 
+    odom =Node(
+        package="terrain_mapping_drone_control",
+        executable="px4_vehicle_odometry_to_ros_odom",
+        name="px4_vehicle_odometry_to_ros_odom",
+        parameters=[{
+            'use_sim_time': True,
+        }]
+    )
+
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'use_sim_time',
@@ -169,6 +179,7 @@ def generate_launch_description():
             default_value=os.environ.get('HOME', '/home/' + os.environ.get('USER', 'user')) + '/PX4-Autopilot',
             description='Path to PX4-Autopilot directory'),
         px4_sitl,
+        
         TimerAction(
             period=2.0,
             actions=[delayed_cylinder]
@@ -180,5 +191,9 @@ def generate_launch_description():
         TimerAction(
             period=3.0,
             actions=[bridge]
-        )
+        ),
+        TimerAction(
+            period=4.0,
+            actions=[odom]
+        ),
     ])
