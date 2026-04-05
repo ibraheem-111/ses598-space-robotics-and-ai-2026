@@ -393,6 +393,11 @@ class CylinderMission(Node):
         z_cmd = self.helix_z
         yaw_cmd = self.yaw_to_center_from_odom(x_cmd, y_cmd) if self.yaw_inward else None
 
+        self.get_logger().info(
+            f"x={x_cmd:.2f}, y={y_cmd:.2f}, z={z_cmd:.2f}, yaw={yaw_cmd:.2f}"
+
+        )
+
         self.publish_odom_trajectory_setpoint(x_cmd, y_cmd, z_cmd, yaw=yaw_cmd)
 
     # ---------------------------------------------
@@ -539,33 +544,53 @@ class CylinderMission(Node):
                 self.state = 'ARM_TAKEOFF'
                 self.start_time = time.time()
 
-        elif self.state == 'ARM_TAKEOFF':
-            target = [0.0, 0.0, self.takeoff_altitude_ned]
-            self.altitude = target[2]
-            yaw_cmd = self.yaw_to_center_from_odom(target[0], target[1]) if self.yaw_inward else None
-            self.publish_odom_trajectory_setpoint(*target, yaw=yaw_cmd)
+        elif self.state == "ARM_TAKEOFF":
+            target = [0.0, 0.0, -5.0]
+            self.publish_odom_trajectory_setpoint(*target, yaw=None)
 
             dx = self.position[0] - target[0]
             dy = self.position[1] - target[1]
             dz = self.position[2] - target[2]
-            dist = math.sqrt(dx ** 2 + dy ** 2 + dz ** 2)
+            dist = math.sqrt(dx**2 + dy**2 + dz**2)
 
-            if dist < 0.4:
-                self.get_logger().info('Vertical in-place takeoff complete. Switching to CIRCLE.')
-                self.reset_helix()
-                self.state = 'CIRCLE'
+            if dist < 0.5:
+                self.theta = math.atan2(
+                    self.position[1] - self.orbit_center_y,
+                    self.position[0] - self.orbit_center_x
+                )
+
+                dxc = self.position[0] - self.orbit_center_x
+                dyc = self.position[1] - self.orbit_center_y
+                current_radius = math.sqrt(dxc * dxc + dyc * dyc)
+                radius_error = abs(current_radius - self.circle_radius)
+
+                self.helix_joined = radius_error <= self.circle_entry_tolerance
+
+                # self.get_logger().info(
+                #     f"Vertical in-place takeoff complete. Switching to CIRCLE. "
+                #     f"current_radius={current_radius:.2f}, "
+                #     f"target_radius={self.circle_radius:.2f}, "
+                #     f"radius_error={radius_error:.2f}, "
+                #     f"joined={self.helix_joined}"
+                # )
+
+                self.state = "CIRCLE"
 
         elif self.state == 'CIRCLE':
-            self.publish_smooth_helix_setpoint()
+            dx = self.position[0] - self.orbit_center_x
+            dy = self.position[1] - self.orbit_center_y
+            current_radius = math.sqrt(dx * dx + dy * dy)
+            radius_error = abs(current_radius - self.circle_radius)
 
-            if self.aruco_is_stably_detected():
-                self.get_logger().info(
-                    f'ArUco stable for {self.aruco_stable_required_sec:.1f}s. '
-                    f'Exiting helix and moving to ARUCO_HOVER.'
-                )
-                self.aruco_hover_target_xy = [float(self.position[0]), float(self.position[1])]
-                self.aruco_hover_start_time = None
-                self.state = 'ARUCO_HOVER'
+            # self.get_logger().info(
+            #     f"helix_joined={self.helix_joined}, "
+            #     f"current_radius={current_radius:.3f}, "
+            #     f"target_radius={self.circle_radius:.3f}, "
+            #     f"radius_error={radius_error:.3f}, "
+            #     f"tolerance={self.circle_entry_tolerance:.3f}"
+            # )
+
+            self.publish_smooth_helix_setpoint()
 
         elif self.state == 'SERVO':
             if self.servo_start_time is None:
