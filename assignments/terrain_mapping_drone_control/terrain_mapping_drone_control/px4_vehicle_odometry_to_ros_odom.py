@@ -11,6 +11,7 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
 from rosgraph_msgs.msg import Clock
 from tf2_ros import TransformBroadcaster
+from tf_transformations import quaternion_multiply
 
 
 def all_finite(values) -> bool:
@@ -27,11 +28,11 @@ class Px4VehicleOdometryRepublisher(Node):
         self.declare_parameter("odom_frame", "odom")
         self.declare_parameter("base_frame", "base_link")
 
-        self.px4_topic = self.get_parameter("px4_topic").value
-        self.clock_topic = self.get_parameter("clock_topic").value
-        self.odom_topic = self.get_parameter("odom_topic").value
-        self.odom_frame = self.get_parameter("odom_frame").value
-        self.base_frame = self.get_parameter("base_frame").value
+        self.px4_topic = str(self.get_parameter("px4_topic").value)
+        self.clock_topic = str(self.get_parameter("clock_topic").value)
+        self.odom_topic = str(self.get_parameter("odom_topic").value)
+        self.odom_frame = str(self.get_parameter("odom_frame").value)
+        self.base_frame = str(self.get_parameter("base_frame").value)
 
         sub_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
@@ -111,34 +112,45 @@ class Px4VehicleOdometryRepublisher(Node):
         odom.header.frame_id = self.odom_frame
         odom.child_frame_id = self.base_frame
 
-        # Raw PX4 position
-        odom.pose.pose.position.x = position[0]
-        odom.pose.pose.position.y = position[1]
-        odom.pose.pose.position.z = position[2]
+        # Position: NED -> ENU
+        odom.pose.pose.position.x = position[1]
+        odom.pose.pose.position.y = position[0]
+        odom.pose.pose.position.z = -position[2]
 
-        # Raw PX4 quaternion: PX4 uses [w, x, y, z], ROS message uses [x, y, z, w]
-        odom.pose.pose.orientation.x = q[1]
-        odom.pose.pose.orientation.y = q[2]
-        odom.pose.pose.orientation.z = q[3]
-        odom.pose.pose.orientation.w = q[0]
+        # Quaternion: PX4 [w,x,y,z] (NED/FRD) -> ROS [x,y,z,w] (ENU/FLU)
+        q_xyzw = [q[1], q[2], q[3], q[0]]
+        q_ned_to_enu = [math.sqrt(0.5), math.sqrt(0.5), 0.0, 0.0]
+        q_frd_to_flu = [1.0, 0.0, 0.0, 0.0]
+        q_enu_flu = quaternion_multiply(quaternion_multiply(q_ned_to_enu, q_xyzw), q_frd_to_flu)
 
-        # Raw PX4 velocity
-        odom.twist.twist.linear.x = velocity[0]
-        odom.twist.twist.linear.y = velocity[1]
-        odom.twist.twist.linear.z = velocity[2]
+        q_norm = math.sqrt(sum(c * c for c in q_enu_flu))
+        if q_norm <= 1e-12:
+            self.warn_throttle("Skipping message with near-zero quaternion norm.")
+            return
+        q_enu_flu = [c / q_norm for c in q_enu_flu]
 
-        # Raw PX4 angular velocity
+        odom.pose.pose.orientation.x = q_enu_flu[0]
+        odom.pose.pose.orientation.y = q_enu_flu[1]
+        odom.pose.pose.orientation.z = q_enu_flu[2]
+        odom.pose.pose.orientation.w = q_enu_flu[3]
+
+        # Linear velocity: NED -> ENU
+        odom.twist.twist.linear.x = velocity[1]
+        odom.twist.twist.linear.y = velocity[0]
+        odom.twist.twist.linear.z = -velocity[2]
+
+        # Angular velocity is body FRD in PX4 -> body FLU in ROS
         odom.twist.twist.angular.x = angular_velocity[0]
-        odom.twist.twist.angular.y = angular_velocity[1]
-        odom.twist.twist.angular.z = angular_velocity[2]
+        odom.twist.twist.angular.y = -angular_velocity[1]
+        odom.twist.twist.angular.z = -angular_velocity[2]
 
         # Minimal covariance passthrough on diagonals only
         pose_cov = [0.0] * 36
         twist_cov = [0.0] * 36
 
         if all_finite(position_variance):
-            pose_cov[0] = position_variance[0]
-            pose_cov[7] = position_variance[1]
+            pose_cov[0] = position_variance[1]
+            pose_cov[7] = position_variance[0]
             pose_cov[14] = position_variance[2]
 
         if all_finite(orientation_variance):
@@ -147,8 +159,8 @@ class Px4VehicleOdometryRepublisher(Node):
             pose_cov[35] = orientation_variance[2]
 
         if all_finite(velocity_variance):
-            twist_cov[0] = velocity_variance[0]
-            twist_cov[7] = velocity_variance[1]
+            twist_cov[0] = velocity_variance[1]
+            twist_cov[7] = velocity_variance[0]
             twist_cov[14] = velocity_variance[2]
 
         odom.pose.covariance = pose_cov
@@ -161,14 +173,15 @@ class Px4VehicleOdometryRepublisher(Node):
         tf_msg.header.frame_id = self.odom_frame
         tf_msg.child_frame_id = self.base_frame
 
-        tf_msg.transform.translation.x = position[0]
-        tf_msg.transform.translation.y = position[1]
-        tf_msg.transform.translation.z = position[2]
+        tf_msg.transform.translation.x = odom.pose.pose.position.x
+        tf_msg.transform.translation.y = odom.pose.pose.position.y
+        tf_msg.transform.translation.z = odom.pose.pose.position.z
 
-        tf_msg.transform.rotation.x = q[1]
-        tf_msg.transform.rotation.y = q[2]
-        tf_msg.transform.rotation.z = q[3]
-        tf_msg.transform.rotation.w = q[0]
+        tf_msg.transform.rotation.x = q_enu_flu[0]
+        tf_msg.transform.rotation.y = q_enu_flu[1]
+        tf_msg.transform.rotation.z = q_enu_flu[2]
+        tf_msg.transform.rotation.w = q_enu_flu[3]
+
 
         self.tf_broadcaster.sendTransform(tf_msg)
 

@@ -1,6 +1,46 @@
+# Solution: 
+
+1. Challange 1: The 
+
+2. Challange 2: Doing slam using RTABMAP with only RGB camera. RTABMAP is made for RGBD or Lidar based SLAM, RGB images alone are not enough to do mapping using RTABMAP. 
+Solution: 
+   a. I first tried in vain to make it work without depth and for that I created the rtabmap_nodepth.launch.py file. 
+   b. I gave up and changed the simulation in terrain_mapping.launch.py from ` make px4_sitl gz_x500_gimbal ` to ` make px4_sitl gz_x500_depth_mono `
+   c. There were errors in the rtabmap.launch.file I was not sure why, it would not start mapping. I found an example file on rtabmap github repo that used rgbd images and visual odometry from kinect to map an environment. From that I understood that it is necessary to sync odometry, depth and rgb data. This version of rtabmap is in rtabmap_new.launch.py
+   d. I created ` /terrain_mapping_drone_control/px4_vehicle_odometry_to_ros_odom.py ` to combine /fmu/out/vehicle_odometry with the timestamps that I exposed from gazebo and publish that to /rtabmap/odom
+   e. The transform from /odom to /base_link was still missing so I added a publishing framework for that in ` px4_vehicle_odometry_to_ros_odom `
+   f. The camera frame was in ENU (East North Up) while px4 was publishing odometry in (North East Down). I learned how to do quaternion transformations using a library called transform3d to convert the frames properly. I also extracted the frame transformations from model.sdf for both the front rgbd camera ( base_link -> OakD-Lite-Modify/base_link) and the down camera (base_link -> mono_camera_link). 
+   g. As a result I was able to do mapping with px4 odometry, but there was a problem I kept getting the following result: ![alt text](<Screenshot from 2026-04-04 17-27-10.png>)
+
+      This result could have been due to two possible reasons: 
+      1. px4 odometry was incorrect
+      2. px4 odometry was out of sync
+
+      To test my theory, I first turned off approx sync, and still got the same result.
+      I eliminated the transformations in ` px4_vehicle_odometry_to_ros_odom.py ` node to prevent latency due to that 
+      I got rid of sim_time = True and made all topics publish with global time
+      I made everything follow sim time
+
+      I still got the same result. 
+      I believe that it is becuase the depth camera's point cloud calculates a different value of depth and possibly more accurate than the assumed distance from the cylinder in px4 odometry
+
+   h. I fixed the mapping by getting rid of PX4 odometry and replacing it with VIO (Visual Inertial Odometry). I exposed the IMU topic from gazebo and mapped it to rtabmap_odom. 
+   ![alt text](<Screenshot from 2026-04-04 16-38-40.png>)
+
+   I got this result because the loop closures were not qualified, there weren't enough matching features. I increased the minimum_matching_inliers for loop closure and got an acceptable map of the cylinder in 3D. 
+  
+   
+3. The mission.launch.py was for two cylinders and wasn't written for mapping a cylinder. 
+   a. I created a fuunction that forces the drone to follow a helical path arround a cylinder while keeping its yaw facing inwards
+   b. I increased the radius so that it could see more features apart from the cylinder like the rock and the rover. 
+
+4. Aruco Tracker does not provide correct information about the location of aruco markers
+
+a. Fixed this by adding a transform from the base_link to down facing camera. 
+
 # Assignment 3: Rocky Times Challenge - Search, Map, & Analyze
 
-iiiiThis ROS2 package implements an autonomous drone system for geological feature detection, mapping, and analysis using an RGBD camera and PX4 SITL simulation.
+This ROS2 package implements an autonomous drone system for geological feature detection, mapping, and analysis using an RGBD camera and PX4 SITL simulation.
 
 ## Challenge Overview
 

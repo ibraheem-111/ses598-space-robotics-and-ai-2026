@@ -166,6 +166,14 @@ def generate_launch_description():
         output='screen'
     )
 
+    tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='tf',
+        arguments=['0', '0', '0.15', '0', '1.5707963267948966', '0', 'base_link', 'mono_camera_link'],
+        output='screen'
+    )
+
     odom =Node(
         package="terrain_mapping_drone_control",
         executable="px4_vehicle_odometry_to_ros_odom",
@@ -203,4 +211,5 @@ def generate_launch_description():
         #     period=4.0,
         #     actions=[odom]
         # ),
+        tf
     ])
