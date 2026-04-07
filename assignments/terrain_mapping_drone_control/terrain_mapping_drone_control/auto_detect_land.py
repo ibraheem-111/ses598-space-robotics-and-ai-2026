@@ -24,6 +24,8 @@ import numpy as np
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
+from logging import Formatter
+
 
 class CylinderMission(Node):
     def __init__(self):
@@ -169,7 +171,7 @@ class CylinderMission(Node):
         # ---------------------------------------------
         # ArUco / mission transitions
         # ---------------------------------------------
-        self.aruco_stable_required_sec = 2.0
+        self.aruco_stable_required_sec = 0.2
         self.aruco_detection_loss_timeout_sec = 1.2
         self.aruco_first_seen_time = None
         self.aruco_last_seen_time = None
@@ -342,12 +344,12 @@ class CylinderMission(Node):
 
         if not self.helix_initialized:
             xy_step = self.circle_entry_speed * dt
-            z_step = max(abs(self.vertical_speed_target_ned), 0.10) * dt
+            z_step = max(abs(self.vertical_speed_target_ned), 0.50) * dt
 
             x_cmd, y_cmd = self.move_xy_toward(px, py, entry_x, entry_y, xy_step)
             z_cmd = self.move_scalar_toward(pz, entry_z, z_step)
             yaw_cmd = self.yaw_to_center_from_odom(x_cmd, y_cmd) if self.yaw_inward else None
-            self.publish_odom_trajectory_setpoint(x_cmd, y_cmd, z_cmd, yaw=yaw_cmd)
+            self.publish_odom_trajectory_setpoint(x_cmd, y_cmd, entry_z, yaw=yaw_cmd)
 
             entry_error_xy = math.hypot(px - entry_x, py - entry_y)
             entry_error_z = abs(pz - entry_z)
@@ -359,6 +361,8 @@ class CylinderMission(Node):
                 )
                 self.helix_entry_logged = True
 
+            
+
             if entry_error_xy <= self.circle_entry_tolerance and entry_error_z <= 0.25:
                 self.helix_initialized = True
                 self.helix_theta = entry_theta
@@ -366,7 +370,25 @@ class CylinderMission(Node):
                 self.current_tangential_speed = 0.0
                 self.current_vertical_speed_ned = 0.0
                 self.get_logger().info('On entry circle. Beginning smooth helical scan.')
+            else:
+                self.get_logger().info(
+                    f'Approaching entry circle: error_xy={entry_error_xy:.2f} m, '
+                    f'error_z={entry_error_z:.2f} m'
+                )
+                self.get_logger().info(
+                    f'command x = {x_cmd:.2f}, y={y_cmd:.2f}, z={z_cmd:.2f}, yaw={yaw_cmd:.2f}'
+                )
+                self.get_logger().info(
+                    f'current radius={r_now:.2f} m, entry radius={math.hypot(entry_x - cx, entry_y - cy):.2f} m'
+                    f'current x = {px:.2f}, y={py:.2f}, z={pz:.2f}, entry x={entry_x:.2f}, entry y={entry_y:.2f}, entry z={entry_z:.2f}'
+                )
             return
+
+        if pz<-12.0:
+            self.circle_radius = 3.0
+            self.vertical_speed_target_ned = -1.0
+            
+
 
         self.current_tangential_speed = self.ramp_toward(
             self.current_tangential_speed,
@@ -496,23 +518,12 @@ class CylinderMission(Node):
                 self.aruco_first_seen_time = now
             self.get_logger().info(f'Updated Marker {marker_id}: x={drone_x}, y={drone_y}, z={drone_z}')
 
-    def aruco_is_stably_detected(self):
-        if self.aruco_last_seen_time is None:
-            return False
+        self.get_logger().info(f'ArUco detection count: {self.aruco_detection_count}')
+        if self.aruco_detection_count >= 10 and self.position[2] < -12.5:
+            self.get_logger().info('ArUco marker detected stably. Transitioning to ARUCO_HOVER.')
+            self.state = 'ARUCO_HOVER'
+            self.aruco_hover_start_time = time.time()
 
-        now = time.time()
-        if now - self.aruco_last_seen_time > self.aruco_detection_loss_timeout_sec:
-            self.aruco_first_seen_time = None
-            self.aruco_detection_count = 0
-            return False
-
-        if self.aruco_first_seen_time is None:
-            self.aruco_first_seen_time = self.aruco_last_seen_time
-            return False
-
-        enough_time = (now - self.aruco_first_seen_time) >= self.aruco_stable_required_sec
-        enough_hits = self.aruco_detection_count >= self.aruco_detection_count_required
-        return enough_time and enough_hits
 
     def reassert_offboard_if_needed(self):
         now = time.time()
@@ -520,17 +531,35 @@ class CylinderMission(Node):
             self.engage_offboard_mode()
             self.last_offboard_reassert_time = now
 
+    def approach_entry_circle(self):
+        # Find closest point on circle to current position
+        dx = self.position[0] - self.orbit_center_x
+        dy = self.position[1] - self.orbit_center_y
+        angle_to_center = math.atan2(dy, dx)
+
+        target_x = self.orbit_center_x + self.circle_radius * math.cos(angle_to_center)
+        target_y = self.orbit_center_y + self.circle_radius * math.sin(angle_to_center)
+        target_z = self.altitude
+
+        target = [target_x, target_y, target_z]
+
+        self.publish_odom_trajectory_setpoint(*target, yaw=None)
+
     # ---------------------------------------------
     # Main state machine
     # ---------------------------------------------
     def timer_callback(self):
         self.publish_offboard_control_mode()
 
+        self.get_logger().info(f'State: {self.state}, Position: {self.position}, Battery: {self.battery_percent}')
+
         if self.state != 'WAIT_INTRINSICS':
             if not self.armed and self.offboard_setpoint_counter >= self.offboard_warmup_cycles:
                 self.engage_offboard_mode()
                 self.arm()
             self.offboard_setpoint_counter += 1
+
+            # self.state="CIRCLE"
 
         if self.state == 'WAIT_INTRINSICS':
             if (self.fx is not None) and (self.fy is not None) and (self.battery_percent is not None):
@@ -541,66 +570,53 @@ class CylinderMission(Node):
                     )
 
                 self.get_logger().info('Intrinsics and battery OK. Moving to ARM_TAKEOFF.')
-                self.state = 'ARM_TAKEOFF'
+                self.state = 'CIRCLE'
                 self.start_time = time.time()
 
-        elif self.state == "ARM_TAKEOFF":
-            target = [0.0, 0.0, -5.0]
-            self.publish_odom_trajectory_setpoint(*target, yaw=None)
 
-            dx = self.position[0] - target[0]
-            dy = self.position[1] - target[1]
-            dz = self.position[2] - target[2]
-            dist = math.sqrt(dx**2 + dy**2 + dz**2)
+        # elif self.state == "ARM_TAKEOFF":
+        #     target = [0.0, 0.0, float(self.altitude)]
+        #     self.publish_odom_trajectory_setpoint(*target, yaw=None)
 
-            if dist < 0.5:
-                self.theta = math.atan2(
-                    self.position[1] - self.orbit_center_y,
-                    self.position[0] - self.orbit_center_x
-                )
+        #     dx = self.position[0] - target[0]
+        #     dy = self.position[1] - target[1]
+        #     dz = self.position[2] - target[2]
+        #     dist = math.sqrt(dx**2 + dy**2 + dz**2)
 
-                dxc = self.position[0] - self.orbit_center_x
-                dyc = self.position[1] - self.orbit_center_y
-                current_radius = math.sqrt(dxc * dxc + dyc * dyc)
-                radius_error = abs(current_radius - self.circle_radius)
+        #     if dist < 0.2:
+        #         self.theta = math.atan2(
+        #             self.position[1] - self.orbit_center_y,
+        #             self.position[0] - self.orbit_center_x
+        #         )
 
-                self.helix_joined = radius_error <= self.circle_entry_tolerance
+        #         dxc = self.position[0] - self.orbit_center_x
+        #         dyc = self.position[1] - self.orbit_center_y
+        #         current_radius = math.sqrt(dxc * dxc + dyc * dyc)
+        #         radius_error = abs(current_radius - self.circle_radius)
 
-                # self.get_logger().info(
-                #     f"Vertical in-place takeoff complete. Switching to CIRCLE. "
-                #     f"current_radius={current_radius:.2f}, "
-                #     f"target_radius={self.circle_radius:.2f}, "
-                #     f"radius_error={radius_error:.2f}, "
-                #     f"joined={self.helix_joined}"
-                # )
+        #         self.helix_joined = radius_error <= self.circle_entry_tolerance
 
-                self.state = "CIRCLE"
+        #         # self.get_logger().info(
+        #         #     f"Vertical in-place takeoff complete. Switching to CIRCLE. "
+        #         #     f"current_radius={current_radius:.2f}, "
+        #         #     f"target_radius={self.circle_radius:.2f}, "
+        #         #     f"radius_error={radius_error:.2f}, "
+        #         #     f"joined={self.helix_joined}"
+        #         # )
 
-        elif self.state == 'CIRCLE':
-            dx = self.position[0] - self.orbit_center_x
-            dy = self.position[1] - self.orbit_center_y
-            current_radius = math.sqrt(dx * dx + dy * dy)
-            radius_error = abs(current_radius - self.circle_radius)
+        #         self.state = "CIRCLE"
 
-            # self.get_logger().info(
-            #     f"helix_joined={self.helix_joined}, "
-            #     f"current_radius={current_radius:.3f}, "
-            #     f"target_radius={self.circle_radius:.3f}, "
-            #     f"radius_error={radius_error:.3f}, "
-            #     f"tolerance={self.circle_entry_tolerance:.3f}"
-            # )
-
-            self.publish_smooth_helix_setpoint()
+        if self.state == 'CIRCLE':
+            print("In CIRCLE state")
+            pass
+            # self.publish_smooth_helix_setpoint()
 
         elif self.state == 'ARUCO_HOVER':
-            self.reassert_offboard_if_needed()
-
-            if self.aruco_hover_target_xy is None:
-                self.aruco_hover_target_xy = [float(self.position[0]), float(self.position[1])]
-
-            target_x, target_y = self.aruco_hover_target_xy
+            self.reassert_offboard_if_needed()            
+            target_x, target_y = self.markers[0][0], self.markers[0][1]
             target_z = self.orbit_min_z_ned
-            yaw_cmd = self.yaw_to_center_from_odom(target_x, target_y) if self.yaw_inward else None
+            # yaw_cmd = self.yaw_to_center_from_odom(target_x, target_y) if self.yaw_inward else None
+            yaw_cmd = None
             self.publish_odom_trajectory_setpoint(target_x, target_y, target_z, yaw=yaw_cmd)
 
             if self.aruco_hover_start_time is None:
@@ -622,17 +638,10 @@ class CylinderMission(Node):
                 self.get_logger().warn('No ArUco markers available yet.')
                 return
 
-            best_marker_id = None
-            min_z = float('inf')
-            for marker_id, (_, _, mz) in self.markers.items():
-                if mz < min_z:
-                    min_z = mz
-                    best_marker_id = marker_id
-
-            dx, dy, dz = self.markers[best_marker_id]
+            dx, dy, dz = self.markers[0]
             self.land_target = [dx, dy, -abs(abs(self.orbit_min_z_ned) - dz)]
             self.get_logger().info(
-                f'Selected Marker {best_marker_id} for landing at '
+                'Landing target selected based on ArUco marker: '
                 f'x={dx:.2f}, y={dy:.2f}, z={self.land_target[2]:.2f}'
             )
             self.state = 'ARUCO_MOVE'

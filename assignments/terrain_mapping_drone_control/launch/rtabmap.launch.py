@@ -3,49 +3,56 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch.actions import LogInfo
-import math
 
-parameters = {
-        'use_sim_time': LaunchConfiguration('use_sim_time'),
-        
-        # RTAB-Map parameters
-        'frame_id': 'base_link',
-        'subscribe_depth': True,
-        'subscribe_rgb': True,
-        'approx_sync': True,
-        
-        # Odometry parameters
-        'odom_frame_id': 'odom',
-        'subscribe_odom_info': False,
-        'odom_tf_angular_variance': 0.01,
-        'odom_tf_linear_variance': 0.001,
-        
-        # Visual odometry parameters
-        'visual_odometry': False,  # Using PX4 odometry instead
-        
-        # Mapping parameters
-        'grid_cell_size': 0.05,
-        'grid_size': 20.0,
-        'optimize_from_graph_end': True,
-        'optimizer_iterations': 100,
-        
-        # Loop closure parameters
-        'loop_closure_activated': True,
-        'loop_closure_restriction_type': 0,
-        'loop_closure_min_inliers': 20,
-        
-        # Memory management
-        'memory_management': True,
-        'max_cloud_size': 50000,
-        'min_cluster_size': 100,
-    }
+parameters = [{
+    'use_sim_time': LaunchConfiguration('use_sim_time'),
 
-remappings=[
+    # RTAB-Map parameters
+    'frame_id': 'base_link',
+    'subscribe_depth': True,
+    'subscribe_rgb': True,
+    'subscribe_rgbd': False,
+    'approx_sync': False,
+    'queue_size': 2,
+    'sync_queue_size': 2,
+    'odom_sensor_sync': False,
+
+    # Odometry parameters
+    'odom_frame_id': 'odom',
+    # 'subscribe_odom_info': False,
+    'odom_tf_angular_variance': 0.01,
+    'odom_tf_linear_variance': 0.001,
+
+    # Visual odometry parameters
+    'visual_odometry': True,
+
+    # Mapping parameters
+    'grid_cell_size': 0.05,
+    'grid_size': 20.0,
+    'optimize_from_graph_end': True,
+    'optimizer_iterations': 100,
+
+    # Loop closure parameters
+    'loop_closure_activated': True,
+    'loop_closure_restriction_type': 0,
+    'loop_closure_min_inliers': 1000,
+
+    # Memory management
+    'memory_management': True,
+    'max_cloud_size': 50000,
+    'min_cluster_size': 100,
+
+    # Odom
+    'publish_tf': True,
+}]
+
+remappings = [
     ('rgb/image', '/drone/front_rgb'),
     ('rgb/camera_info', '/drone/camera_info'),
     ('depth/image', '/drone/front_depth'),
-    ('odom', '/rtabmap/odom')
-    ]
+    ('odom', '/rtabmap/odom'),
+    ('imu', '/drone/imu'),
+]
 
 def generate_launch_description():
     return LaunchDescription([
@@ -65,9 +72,16 @@ def generate_launch_description():
             name='camera_to_base_link',
             # arguments=['0.1', '0', '0.05', str(-math.pi/2), '0', str(-math.pi/2), 'base_link', 'OakD-Lite-Modify/base_link'],
             # arguments=['0', '0', '0', str(-math.pi/2), '0', str(-math.pi/2), 'base_link', 'OakD-Lite-Modify/base_link'],
-            arguments=['0.1', '0', '0.0', str(-math.pi/2), '0', str(-math.pi/2), 'base_link', 'OakD-Lite-Modify/base_link'],
+            # Keep translation from model.sdf; rotate to ROS optical-frame convention.
+            arguments=['.12', '.03', '.242', '-1.57079632679', '0', '-1.57079632679', 'base_link', 'OakD-Lite-Modify/base_link'],
             output='screen'
-        ),  
+        ),
+
+        Node(
+            package='rtabmap_odom', executable='rgbd_odometry', output='screen',
+            parameters=parameters,
+            remappings=remappings,
+            ),
 
         # RTAB-Map node
         Node(
@@ -76,7 +90,7 @@ def generate_launch_description():
             name='rtabmap',
             output='screen',
             arguments=['-d'],
-            parameters=[parameters],
+            parameters=parameters,
             # remappings=[
             #     # Camera topics
             #     ('rgb/image', '/drone/front_rgb'),
@@ -96,33 +110,29 @@ def generate_launch_description():
         ),
 
         # RTAB-Map point cloud generation
-        Node(
-            package='rtabmap_util',
-            executable='point_cloud_xyz',
-            name='point_cloud_xyz',
-            # parameters=[{
-            #     'use_sim_time': LaunchConfiguration('use_sim_time'),
-            #     'decimation': 4,
-            #     'voxel_size': 0.02,
-            #     'max_depth': 4.0,
-            #     'min_depth': 0.4
-            # }],
-            parameters=[parameters],
-               
-            # remappings=[
-            #     ('depth/image', '/drone/front_depth'),
-            #     ('depth/camera_info', '/drone/front_depth/camera_info'),
-            #     ('cloud', 'cloud_xyz')
-            # ]
-            remappings = remappings
-        ),
+        # Node(
+        #     package='rtabmap_util',
+        #     executable='point_cloud_xyz',
+        #     name='point_cloud_xyz',
+        #     # parameters=[{
+        #     #     'use_sim_time': LaunchConfiguration('use_sim_time'),
+        #     #     'decimation': 4,
+        #     #     'voxel_size': 0.02,
+        #     #     'max_depth': 4.0,
+        #     #     'min_depth': 0.4
+        #     # }],
+        #     parameters=parameters,
+        #     remappings=remappings
+        # ),
+
+
 
         Node(
             package='rtabmap_viz',
             executable='rtabmap_viz',
             name='rtabmap_viz',
             output='screen',
-            parameters=[parameters],
+            parameters=parameters,
             remappings=remappings
         ),
 

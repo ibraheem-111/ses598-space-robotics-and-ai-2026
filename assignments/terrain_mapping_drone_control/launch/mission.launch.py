@@ -38,29 +38,22 @@ def generate_launch_description():
             parameters=[{
                 'orbit_center_x': 5.0,  
                 'orbit_center_y': 0.0,
-                'radius': 5.0, 
-                'takeoff_altitude_ned': -3.0,
+                'radius': 7.0, 
+                'takeoff_altitude_ned': -4.0,
                 'orbit_min_z_ned': -20.0,
-                'orbit_climb_step_ned': -0.01, 
                 'tangential_speed': 0.18,  # m/s
                 'control_period': 0.05,   # 20 Hz
                 'circle_entry_tolerance': 0.2,  # m
+                'tangential_accel': 0.06,  # m/s^2
+                'vertical_accel': 0.8,    # m/s^2
+                'circle_entry_speed':15.0,  # m/s
+                'yaw_inward': True,
+                # 'vertical_speed_ned': -1.0,  # m/s (negative for downward)
             }],
             # ros_arguments=['--log-level', 'debug'],  
         )
     ])
-    """    self.declare_parameter('orbit_center_x', 0.0)          # odom frame
-        self.declare_parameter('orbit_center_y', 0.0)          # odom frame
-        self.declare_parameter('radius', 5.0)                  # meters
-        self.declare_parameter('takeoff_altitude_ned', -5.0)   # PX4-style NED z
-        self.declare_parameter('orbit_min_z_ned', -20.0)       # more negative = higher in NED
-        self.declare_parameter('tangential_speed', 0.18)       # m/s around cylinder
+    """    
+    
         self.declare_parameter('vertical_speed_ned', float('nan'))
-        self.declare_parameter('orbit_climb_step_ned', float('nan'))  # legacy alias, now interpreted as m/s
-        self.declare_parameter('tangential_accel', 0.06)       # m/s^2 ramp for smooth start
-        self.declare_parameter('vertical_accel', 0.02)         # m/s^2 ramp for smooth climb
-        self.declare_parameter('control_period', 0.05)         # 20 Hz setpoint stream
-        self.declare_parameter('circle_entry_speed', 0.30)     # m/s while joining circle
-        self.declare_parameter('circle_entry_tolerance', 0.25) # meters
-        self.declare_parameter('yaw_inward', True
 """

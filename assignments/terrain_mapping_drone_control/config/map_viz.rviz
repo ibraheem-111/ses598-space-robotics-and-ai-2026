@@ -1,0 +1,352 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Help Height: 78
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /RTAB-Map1
+        - /RTAB-Map1/RTAB-Map Graph1
+        - /TF1
+      Splitter Ratio: 0.55
+    Tree Height: 640
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+    Expanded:
+      - /2D Goal Pose1
+      - /Publish Point1
+    Splitter Ratio: 0.58
+  - Class: rviz_common/Views
+    Name: Views
+    Expanded:
+      - /Current View1
+    Splitter Ratio: 0.50
+
+Visualization Manager:
+  Class: ""
+  Name: root
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Alpha: 0.5
+      Cell Size: 1
+      Color: 160; 160; 164
+      Line Style:
+        Value: Lines
+        Line Width: 0.03
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: ""
+      Value: true
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Frame Timeout: 15
+      Marker Scale: 0.5
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Update Interval: 0
+      Frames:
+        All Enabled: false
+        map:
+          Value: true
+        odom:
+          Value: true
+        base_link:
+          Value: true
+        camera_link:
+          Value: true
+      Tree:
+        map:
+          odom:
+            base_link:
+              camera_link: {}
+      Value: true
+
+    - Class: rviz_default_plugins/Image
+      Name: RGB Camera
+      Enabled: true
+      Topic:
+        Value: /drone/front_rgb
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+      Max Value: 1
+      Min Value: 0
+      Median window: 5
+      Normalize Range: true
+      Value: true
+
+    - Class: rviz_default_plugins/Path
+      Name: RTAB-Map Path
+      Enabled: true
+      Topic:
+        Value: /mapPath
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Alpha: 1
+      Buffer Length: 1
+      Color: 25; 255; 0
+      Head Diameter: 0.15
+      Head Length: 0.10
+      Length: 0.15
+      Line Style: Lines
+      Line Width: 0.03
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.03
+      Shaft Diameter: 0.05
+      Shaft Length: 0.05
+      Value: true
+
+    - Class: rviz_default_plugins/Map
+      Name: Occupancy Grid
+      Enabled: true
+      Topic:
+        Value: /map
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Alpha: 0.7
+      Color Scheme: map
+      Draw Behind: false
+      Value: true
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Cloud Map
+      Enabled: true
+      Topic:
+        Value: /cloud_map
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Value: true
+        Min Value: 0
+        Max Value: 10
+      Axis: Z
+      Channel Name: intensity
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.02
+      Style: Flat Squares
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Live Depth Cloud
+      Enabled: true
+      Topic:
+        Value: /cloud_xyz
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Value: true
+        Min Value: 0
+        Max Value: 10
+      Axis: Z
+      Channel Name: intensity
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.02
+      Style: Flat Squares
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+
+    - Class: rviz_common/Group
+      Name: RTAB-Map
+      Enabled: true
+      Displays:
+        - Class: rtabmap_ros/MapGraph
+          Name: RTAB-Map Graph
+          Enabled: true
+          Topic:
+            Value: /mapGraph
+            Depth: 5
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+          Alpha: 1
+          Buffer Length: 1
+          Color: 255; 255; 0
+          Head Diameter: 0.10
+          Head Length: 0.08
+          Length: 0.08
+          Line Style: Lines
+          Line Width: 0.03
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0
+          Pose Color: 255; 85; 255
+          Pose Style: None
+          Radius: 0.03
+          Shaft Diameter: 0.04
+          Shaft Length: 0.04
+          Value: true
+
+        - Class: rtabmap_ros/MapCloud
+          Name: RTAB-Map MapCloud
+          Enabled: true
+          Topic:
+            Value: /mapData
+            Depth: 5
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+          Download Graph: false
+          Download Map: false
+          Cloud decimation: 4
+          Cloud max depth (m): 0
+          Cloud voxel size (m): 0.02
+          Filter floor (m): 0
+          Node filtering angle (degrees): 30
+          Node filtering radius (m): 0.2
+          Value: true
+
+        - Class: rtabmap_ros/Info
+          Name: RTAB-Map Info
+          Enabled: true
+          Topic:
+            Value: /info
+            Depth: 5
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+          Value: true
+
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Value: /initialpose
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Covariance x: 0.25
+      Covariance y: 0.25
+      Covariance yaw: 0.06853891909122467
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/PublishPoint
+      Single click: true
+      Topic:
+        Value: /clicked_point
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+      Value: true
+
+Views:
+  Current:
+    Class: rviz_default_plugins/Orbit
+    Name: Current View
+    Value: Orbit (rviz_default_plugins)
+    Target Frame: map
+    Distance: 10
+    Focal Point:
+      X: 0
+      Y: 0
+      Z: 0
+    Pitch: 0.785
+    Yaw: 0.785
+    Near Clip Distance: 0.01
+    Invert Z Axis: false
+    Focal Shape Fixed Size: true
+    Focal Shape Size: 0.05
+    Enable Stereo Rendering:
+      Value: false
+      Stereo Eye Separation: 0.06
+      Stereo Focal Distance: 1
+      Swap Stereo Eyes: false
+  Saved:
+    - Class: rviz_default_plugins/TopDownOrtho
+      Name: TopDownOrtho
+      Value: TopDownOrtho (rviz_default_plugins)
+      Target Frame: map
+      Scale: 20
+      X: 0
+      Y: 0
+      Angle: 0
+      Near Clip Distance: 0.01
+      Invert Z Axis: false
+      Enable Stereo Rendering:
+        Value: false
+        Stereo Eye Separation: 0.06
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+
+Window Geometry:
+  Displays:
+    collapsed: false
+  Selection:
+    collapsed: false
+  Tool Properties:
+    collapsed: false
+  Views:
+    collapsed: false
+  Height: 960
+  Width: 1600
+  X: 50
+  Y: 50

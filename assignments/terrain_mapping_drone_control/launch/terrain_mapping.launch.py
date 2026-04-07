@@ -27,6 +27,8 @@ def generate_launch_description():
     
     # Add launch argument for PX4-Autopilot path
     px4_autopilot_path = LaunchConfiguration('px4_autopilot_path')
+
+    use_sim_time = True
     
     # Launch PX4 SITL with x500_depth
     px4_sitl = ExecuteProcess(
@@ -113,7 +115,7 @@ def generate_launch_description():
         executable='parameter_bridge',
         name='bridge',
         parameters=[{
-            'use_sim_time': True,
+            'use_sim_time': use_sim_time,
         }],
         arguments=[
             # Front RGB Camera
@@ -132,8 +134,10 @@ def generate_launch_description():
             
             # Clock and Odometry
             # '/world/default/clock@rosgraph_msgs/msg/Clock@gz.msgs.Clock',
-            'world/default/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+            '/world/default/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
             '/model/x500_depth_mono_0/odometry_with_covariance@nav_msgs/msg/Odometry@gz.msgs.OdometryWithCovariance',
+
+            '/world/default/model/x500_depth_mono_0/link/base_link/sensor/imu_sensor/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
         ],
         remappings=[
             # Front RGB Camera remappings
@@ -151,10 +155,13 @@ def generate_launch_description():
             ('/mono_camera/camera_info', '/drone/down_mono/camera_info'),
 
             # Gazebo clock remapping
-            ('/world/default/clock', 'gz/clock'),
+            ('/world/default/clock', '/gz/clock'),
             
             # Odometry remapping
-            ('/model/x500_depth_mono_0/odometry_with_covariance', '/rtabmap/odom'),
+            ('/model/x500_depth_mono_0/odometry_with_covariance', '/gz/odometry_with_covariance'),
+
+            # IMU
+            ('/world/default/model/x500_depth_mono_0/link/base_link/sensor/imu_sensor/imu', '/drone/imu'),
         ],
         output='screen'
     )
@@ -164,7 +171,7 @@ def generate_launch_description():
         executable="px4_vehicle_odometry_to_ros_odom",
         name="px4_vehicle_odometry_to_ros_odom",
         parameters=[{
-            'use_sim_time': True,
+            'use_sim_time': use_sim_time,
         }]
     )
 
@@ -172,7 +179,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'use_sim_time',
-            default_value='True',
+            default_value=str(use_sim_time),
             description='Use simulation (Gazebo) clock if true'),
         DeclareLaunchArgument(
             'px4_autopilot_path',
@@ -192,8 +199,8 @@ def generate_launch_description():
             period=3.0,
             actions=[bridge]
         ),
-        TimerAction(
-            period=4.0,
-            actions=[odom]
-        ),
+        # TimerAction(
+        #     period=4.0,
+        #     actions=[odom]
+        # ),
     ])
