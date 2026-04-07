@@ -38,6 +38,20 @@ Solution:
 
 a. Fixed this by adding a transform from the base_link to down facing camera. 
 
+# Run My Solution Using the following commands: 
+
+` ros2 launch terrain_mapping_drone_control terrain_mapping.launch.py `
+
+` ros2 launch terrain_mapping_drone_control rtabmap.launch.py `
+
+` ./QGroundControl.AppInmge `
+
+` MicroXRCEAgent udp4 -p 8888 `
+
+wait for the /fmu/ topics to be visible
+
+` ros2 launch terrain_mapping_drone_control mission.launch.py `
+
 # Assignment 3: Rocky Times Challenge - Search, Map, & Analyze
 
 This ROS2 package implements an autonomous drone system for geological feature detection, mapping, and analysis using an RGBD camera and PX4 SITL simulation.
