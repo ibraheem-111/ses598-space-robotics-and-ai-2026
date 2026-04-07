@@ -34,6 +34,8 @@ Solution:
    a. I created a fuunction that forces the drone to follow a helical path arround a cylinder while keeping its yaw facing inwards
    b. I increased the radius so that it could see more features apart from the cylinder like the rock and the rover. 
 
+   ![alt text](vlcsnap-2026-04-07-04h03m27s211.png)
+
 4. Aruco Tracker does not provide correct information about the location of aruco markers
 
 a. Fixed this by adding a transform from the base_link to down facing camera. 
